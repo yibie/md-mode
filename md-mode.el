@@ -52,6 +52,17 @@
   :type 'boolean
   :group 'md)
 
+(defcustom md-mode-toc-side 'left
+  "Side on which to display the Markdown table of contents."
+  :type '(choice (const :tag "Left" left)
+                 (const :tag "Right" right))
+  :group 'md)
+
+(defcustom md-mode-toc-width 30
+  "Width in columns of the Markdown table of contents."
+  :type 'natnum
+  :group 'md)
+
 (defface md-mode-callout
   '((t :inherit font-lock-keyword-face :weight bold))
   "Face for GitHub-style Markdown callout markers."
@@ -62,6 +73,15 @@
 
 (defvar-local md-mode--source-point nil
   "Point to restore when returning to Markdown source.")
+
+(defvar-local md-mode--toc-buffer nil
+  "Table of contents buffer associated with this Markdown buffer.")
+
+(defvar-local md-mode--toc-source-buffer nil
+  "Markdown source buffer associated with this TOC buffer.")
+
+(defvar-local md-mode--toc-markers nil
+  "Heading markers currently displayed in this TOC buffer.")
 
 (define-fringe-bitmap
   'md-mode--table-overflow-dots
@@ -74,6 +94,17 @@
   "q" #'md-mode-insert-blockquote
   "c" #'md-mode-insert-code
   "a" #'md-mode-insert-callout)
+
+(defvar-keymap md-mode--toc-mode-map
+  :parent special-mode-map
+  "RET" #'md-mode--toc-visit
+  "<mouse-1>" #'md-mode--toc-mouse-visit
+  "g" #'md-mode--toc-refresh
+  "q" #'md-mode--toc-quit)
+
+(define-derived-mode md-mode--toc-mode special-mode "MD TOC"
+  "Major mode for a Markdown table of contents."
+  (setq-local truncate-lines t))
 
 (defvar-keymap md-mode-map
   :parent text-mode-map
@@ -102,6 +133,7 @@
   "C-c C-b" #'md-mode-backward-same-level
   "C-c C-j" #'md-mode-goto-heading
   "C-c C-o" #'md-mode-open-at-point
+  "C-c C-t" #'md-mode-toggle-toc
   "C-c |" #'md-mode-table
   "C-c -" #'md-mode-cycle-list-marker
   "M-h" #'md-mode-mark-element
@@ -685,6 +717,109 @@ ignored."
             (push node roots))
           (push node stack))))
     (mapcar #'md-mode--imenu-node (nreverse roots))))
+
+(defun md-mode--get-toc-buffer ()
+  "Return the TOC buffer for the current Markdown source buffer."
+  (unless (buffer-live-p md-mode--toc-buffer)
+    (let ((source (current-buffer)))
+      (setq md-mode--toc-buffer
+            (generate-new-buffer
+             (format "*MD TOC: %s*" (buffer-name source))))
+      (with-current-buffer md-mode--toc-buffer
+        (md-mode--toc-mode)
+        (setq md-mode--toc-source-buffer source))))
+  md-mode--toc-buffer)
+
+(defun md-mode--toc-refresh ()
+  "Refresh the current Markdown TOC buffer."
+  (interactive)
+  (unless (derived-mode-p 'md-mode--toc-mode)
+    (user-error "Not in an md-mode TOC"))
+  (dolist (marker md-mode--toc-markers)
+    (set-marker marker nil))
+  (setq md-mode--toc-markers nil)
+  (let ((source md-mode--toc-source-buffer)
+        (inhibit-read-only t))
+    (erase-buffer)
+    (if (not (buffer-live-p source))
+        (insert "Source buffer is no longer available.\n")
+      (setq header-line-format
+            (format " %s" (buffer-name source)))
+      (let ((entries
+             (with-current-buffer source
+               (md-mode--heading-entries))))
+        (if (not entries)
+            (insert "No headings.\n")
+          (dolist (entry entries)
+            (let* ((level (plist-get entry :level))
+                   (marker (plist-get entry :marker))
+                   (begin (point)))
+              (insert (make-string (* 2 (1- level)) ?\s)
+                      (plist-get entry :title)
+                      "\n")
+              (add-text-properties
+               begin (1- (point))
+               `(md-mode-toc-target ,marker
+                 mouse-face highlight
+                 help-echo "RET or mouse-1: visit heading"
+                 face ,(intern
+                        (format "outline-%d" (min level 8)))))
+              (push marker md-mode--toc-markers)))))))
+  (goto-char (point-min)))
+
+(defun md-mode--toc-target-at-point ()
+  "Return the heading marker on the current TOC line."
+  (or (get-text-property (point) 'md-mode-toc-target)
+      (let ((end (line-end-position)))
+        (and (> end (line-beginning-position))
+             (get-text-property (1- end)
+                                'md-mode-toc-target)))))
+
+(defun md-mode--toc-visit ()
+  "Visit the Markdown heading on the current TOC line."
+  (interactive)
+  (let ((target (md-mode--toc-target-at-point)))
+    (unless (and (markerp target)
+                 (marker-buffer target)
+                 (marker-position target))
+      (user-error "No live Markdown heading on this line"))
+    (let ((source (marker-buffer target)))
+      (if-let* ((window (get-buffer-window source)))
+          (select-window window)
+        (pop-to-buffer source))
+      (goto-char target)
+      (unless md-mode--rendered-p
+        (outline-show-entry))
+      (beginning-of-line))))
+
+(defun md-mode--toc-mouse-visit (event)
+  "Visit the Markdown heading clicked by mouse EVENT."
+  (interactive "e")
+  (mouse-set-point event)
+  (md-mode--toc-visit))
+
+(defun md-mode--toc-quit ()
+  "Close the selected Markdown TOC window."
+  (interactive)
+  (quit-window nil (selected-window)))
+
+;;;###autoload
+(defun md-mode-toggle-toc ()
+  "Toggle the table of contents for the current Markdown buffer."
+  (interactive)
+  (md-mode--ensure-mode)
+  (let* ((toc (md-mode--get-toc-buffer))
+         (window (get-buffer-window toc)))
+    (if window
+        (delete-window window)
+      (with-current-buffer toc
+        (md-mode--toc-refresh))
+      (display-buffer-in-side-window
+       toc
+       `((side . ,md-mode-toc-side)
+         (slot . 0)
+         (window-width . ,(max 1 md-mode-toc-width))
+         (preserve-size . (t . nil)))))))
 
 ;;;###autoload
 (defun md-mode-goto-heading (position)
@@ -1810,6 +1945,7 @@ When the region is active, use its lines as the callout body."
       "C-c C-b" #'md-mode-backward-same-level
       "C-c C-j" #'md-mode-goto-heading
       "C-c C-o" #'md-mode-open-at-point
+      "C-c C-t" #'md-mode-toggle-toc
       "C-c |" #'md-mode-table
       "C-c -" #'md-mode-cycle-list-marker
       "M-h" #'md-mode-mark-element

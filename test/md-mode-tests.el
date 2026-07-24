@@ -150,6 +150,107 @@
     (kill-buffer buffer)
     (should-not (marker-buffer marker))))
 
+(ert-deftest md-mode-toggles-one-toc-per-source-buffer ()
+  (save-window-excursion
+    (let ((source (generate-new-buffer " *md-mode-toc-source*"))
+          toc)
+      (unwind-protect
+          (progn
+            (set-window-buffer (selected-window) source)
+            (with-current-buffer source
+              (insert "# Root\n## Child\n")
+              (md-mode)
+              (should (eq (key-binding (kbd "C-c C-t"))
+                          #'md-mode-toggle-toc))
+              (let ((md-mode-toc-side 'right)
+                    (md-mode-toc-width 24))
+                (md-mode-toggle-toc)
+                (setq toc md-mode--toc-buffer)
+                (let ((window (get-buffer-window toc)))
+                  (should (buffer-live-p toc))
+                  (should (eq (buffer-local-value
+                               'md-mode--toc-source-buffer toc)
+                              source))
+                  (should (eq (window-parameter window 'window-side)
+                              'right))
+                  (should (= (window-total-width window) 24)))
+                (md-mode-toggle-toc)
+                (should-not (get-buffer-window toc))
+                (md-mode-toggle-toc)
+                (should (eq md-mode--toc-buffer toc)))))
+        (when (buffer-live-p toc)
+          (kill-buffer toc))
+        (kill-buffer source)))))
+
+(ert-deftest md-mode-toc-renders-hierarchy-and-visits-headings ()
+  (save-window-excursion
+    (let ((source (generate-new-buffer " *md-mode-toc-visit*"))
+          toc)
+      (unwind-protect
+          (progn
+            (set-window-buffer (selected-window) source)
+            (with-current-buffer source
+              (insert "# Root\nBody\n### Deep\n## Child\n")
+              (md-mode)
+              (md-mode-toggle-toc)
+              (setq toc md-mode--toc-buffer)
+              (goto-char (point-min))
+              (outline-hide-subtree))
+            (with-current-buffer toc
+              (should (equal (buffer-string)
+                             "Root\n    Deep\n  Child\n"))
+              (goto-char (point-min))
+              (search-forward "Deep")
+              (beginning-of-line)
+              (let ((target (get-text-property
+                             (point) 'md-mode-toc-target)))
+                (should (markerp target))
+                (should (eq (marker-buffer target) source))))
+            (select-window (get-buffer-window toc))
+            (with-current-buffer toc
+              (goto-char (point-min))
+              (search-forward "Deep")
+              (md-mode--toc-visit))
+            (should (eq (window-buffer (selected-window)) source))
+            (with-current-buffer source
+              (should (looking-at "### Deep"))
+              (should-not (outline-invisible-p (point)))))
+        (when (buffer-live-p toc)
+          (kill-buffer toc))
+        (kill-buffer source)))))
+
+(ert-deftest md-mode-toc-refreshes-and-closes-its-window ()
+  (save-window-excursion
+    (let ((source (generate-new-buffer " *md-mode-toc-refresh*"))
+          toc)
+      (unwind-protect
+          (progn
+            (set-window-buffer (selected-window) source)
+            (with-current-buffer source
+              (insert "# One\n")
+              (md-mode)
+              (md-mode-toggle-toc)
+              (setq toc md-mode--toc-buffer)
+              (goto-char (point-max))
+              (insert "## Two\n"))
+            (with-current-buffer toc
+              (should (eq (key-binding (kbd "g"))
+                          #'md-mode--toc-refresh))
+              (should (eq (key-binding (kbd "q"))
+                          #'md-mode--toc-quit))
+              (should (eq (key-binding (kbd "<mouse-1>"))
+                          #'md-mode--toc-mouse-visit))
+              (md-mode--toc-refresh)
+              (should (equal (buffer-string) "One\n  Two\n")))
+            (select-window (get-buffer-window toc))
+            (with-current-buffer toc
+              (md-mode--toc-quit))
+            (should-not (get-buffer-window toc))
+            (should (get-buffer-window source)))
+        (when (buffer-live-p toc)
+          (kill-buffer toc))
+        (kill-buffer source)))))
+
 (ert-deftest md-mode-inserts-list-items ()
   (with-temp-buffer
     (insert "7. ordered")
