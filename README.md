@@ -1,7 +1,7 @@
 # md-mode
 
-Markdown in Emacs with live styling, source-preserving tables, and an
-Org-inspired editing workflow.
+Markdown in Emacs with live styling, source-preserving tables, a live
+document outline, and an Org-inspired editing workflow.
 
 `md-mode` is an opinionated major mode for people who enjoy the direct,
 structural editing of Org mode but need their files to remain ordinary
@@ -25,8 +25,10 @@ It provides two views of the same buffer:
   callouts, and table decoration are visible without leaving the source
   buffer.
 - **Tables that remain Markdown.** Tables auto-align, display with box-drawing
-  borders, and truncate cleanly at the window edge. The decoration uses text
-  properties; the file still contains normal pipe-table syntax.
+  borders, truncate cleanly at the window edge, and can be created or deleted
+  as complete structures. The file still contains normal pipe-table syntax.
+- **Structure beside the document.** A live TOC shows ATX headings in a side
+  window and jumps through the same marker-backed index used by Imenu.
 - **Org-like structural editing.** Fold sections, navigate headings, promote
   or demote subtrees, continue lists, toggle tasks, and edit table rows and
   columns with familiar keys.
@@ -48,15 +50,16 @@ package ecosystem.
 | Primary goal     | A styled, Org-like Markdown workspace                                            | Broad Markdown editing and tooling                                                               |
 | Editable display | Live styling is the default experience                                           | Syntax-oriented by default; markup hiding and heading scaling are optional                       |
 | Complete preview | Read-only rendering in the same buffer, built in                                 | HTML preview and export through a configured Markdown processor                                  |
-| Tables           | Auto-aligned, box-drawn, width-aware, and structurally editable                  | Part of a wider, more configurable editing environment                                           |
-| Workflow         | Compact, opinionated Org-style key set                                           | Extensive command set covering more Markdown conventions                                         |
+| Tables           | Created, deleted, auto-aligned, box-drawn, width-aware, and structurally editable | Part of a wider, more configurable editing environment                                           |
+| Workflow         | Compact Org-style key set with a built-in per-buffer TOC                          | Extensive command set covering more Markdown conventions                                         |
 | Scope            | Common Markdown/GFM authoring, currently focused on .md files and ATX headings | Multiple filename conventions, markdown-mode, gfm-mode, extensions, export, and integrations |
 
 Choose `md-mode` when the editing surface itself matters most: you want a
 document that looks structured while it remains editable, and you want
-same-buffer rendering without an external command. Choose `markdown-mode`
-when format coverage, export pipelines, mature integrations, or long-term
-compatibility are more important.
+same-buffer rendering without an external command.
+
+Choose `markdown-mode` when format coverage, export pipelines, mature
+integrations, or long-term compatibility are more important.
 
 ## Requirements
 
@@ -91,6 +94,8 @@ styled as you type.
 - Press `TAB` on a heading to fold or reveal its section.
 - Press `C-c C-c` on `- [ ]` to toggle it to `- [x]`.
 - Press `M-S-RET` to create another task.
+- Press `C-c |` outside a table to create one, or inside a table to align it.
+- Press `C-c C-t` to open a live heading TOC beside the document.
 - Press `C-c C-v` to enter the complete rendered view; press it again to
   restore the source.
 
@@ -108,6 +113,7 @@ styled as you type.
 | C-c C-u           | Move to the parent heading                        |
 | C-c C-f / C-c C-b | Next / previous same-level heading                |
 | C-c C-j           | Jump to a selected heading                        |
+| C-c C-t           | Toggle the live heading TOC (`md-mode-toggle-toc`) |
 | C-c @             | Mark the current subtree                          |
 | M-h               | Mark the current structural element               |
 
@@ -124,14 +130,17 @@ styled as you type.
 
 ### Tables
 
-| Key                  | Action                   |
-|----------------------|--------------------------|
-| TAB                  | Move to the next cell    |
-| C-c C-c              | Align the table          |
-| M-Left / M-Right     | Move the current column  |
-| M-Up / M-Down        | Move the current row     |
-| M-S-Left / M-S-Right | Delete / insert a column |
-| M-S-Up / M-S-Down    | Delete / insert a row    |
+| Key                        | Action                                      |
+|----------------------------|---------------------------------------------|
+| C-c \|                     | Create or align (`md-mode-table`)            |
+| M-x md-mode-insert-table   | Create a sized table (default: 3 × 2)        |
+| TAB                        | Align the table and move to the next cell   |
+| C-c C-c                    | Align the table                             |
+| M-Left / M-Right           | Move the current column                     |
+| M-Up / M-Down              | Move the current row                        |
+| M-S-Left / M-S-Right       | Delete / insert a column                    |
+| M-S-Up / M-S-Down          | Delete / insert a row                       |
+| M-x md-mode-delete-table   | Delete the complete table at point          |
 
 ### Links and blocks
 
@@ -154,6 +163,17 @@ without changing table rendering:
 (setq md-mode-auto-align-tables nil)
 ```
 
+The TOC opens on the left at 30 columns. Change either default without
+affecting Imenu or heading navigation:
+
+```elisp
+(setq md-mode-toc-side 'right
+      md-mode-toc-width 36)
+```
+
+The TOC works in Edit view and Rendered view. Press `RET` or click an entry to
+jump, `g` to refresh manually, and `q` to close its window.
+
 Use `M-x customize-group RET md RET` for editing behavior and
 `M-x customize-group RET md-render RET` for renderer faces and options.
 
@@ -161,10 +181,14 @@ Use `M-x customize-group RET md RET` for editing behavior and
 
 `md-mode` is an early-stage, focused package rather than a drop-in replacement
 for every `markdown-mode` workflow. It currently targets common Markdown and
-GitHub-style authoring, associates itself with `.md` files, and uses ATX
-headings for structural commands. Browser preview, HTML export, wiki links,
-footnotes, and the broader dialect coverage of `markdown-mode` are outside its
-present scope.
+GitHub-style authoring and associates itself with `.md` files.
+
+Browser preview, HTML export, wiki links, footnotes, and the broader dialect
+coverage of `markdown-mode` are outside its present scope.
+
+The TOC, Imenu, and structural commands index ATX headings (`#` through
+`######`) in the current buffer only. Setext headings and project-wide indexes
+are not included.
 
 ## Development
 
