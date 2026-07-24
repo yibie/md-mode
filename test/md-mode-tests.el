@@ -31,6 +31,16 @@
     (or (eq value face)
         (and (listp value) (memq face value)))))
 
+(defun md-mode-tests--imenu-shape (index)
+  "Return INDEX titles and hierarchy without target markers."
+  (mapcar
+   (lambda (entry)
+     (if (markerp (cdr entry))
+         (car entry)
+       (cons (car entry)
+             (md-mode-tests--imenu-shape (cddr entry)))))
+   index))
+
 (ert-deftest md-mode-opens-in-editable-styled-source ()
   (with-temp-buffer
     (insert md-mode-tests--source)
@@ -66,6 +76,79 @@
     (should (looking-at "### Three"))
     (md-mode-previous-heading)
     (should (looking-at "## Two"))))
+
+(ert-deftest md-mode-builds-nested-imenu ()
+  (with-temp-buffer
+    (insert (concat "# Root\n"
+                    "## Child\n"
+                    "#### Deep\n"
+                    "## Child\n"
+                    "# Next\n"
+                    "```text\n# Hidden\n```\n"))
+    (md-mode)
+    (should (eq imenu-create-index-function #'md-mode--imenu-index))
+    (let* ((index (funcall imenu-create-index-function))
+           (root (car index))
+           (children (cddr root))
+           (first-child (car children)))
+      (should (equal (mapcar #'car index) '("Root" "Next")))
+      (should (= (length children) 2))
+      (should (string-prefix-p "Child" (caar children)))
+      (should (string-prefix-p "Child" (caadr children)))
+      (should-not (equal (caar children) (caadr children)))
+      (should (equal (mapcar #'car (cddr first-child))
+                     '("Deep")))
+      (should (marker-position (cdadr root)))
+      (should (eq (marker-buffer (cdadr root)) (current-buffer))))))
+
+(ert-deftest md-mode-imenu-matches-rendered-view ()
+  (with-temp-buffer
+    (insert (concat "# Root\n"
+                    "## Child\n"
+                    "#### Deep\n"
+                    "# Next\n"
+                    "```text\n# Hidden\n```\n"))
+    (md-mode)
+    (let ((shape (md-mode-tests--imenu-shape
+                  (funcall imenu-create-index-function))))
+      (should (equal shape '(("Root" ("Child" "Deep")) "Next")))
+      (md-mode-render)
+      (let ((index (funcall imenu-create-index-function)))
+        (should (equal (md-mode-tests--imenu-shape index) shape))
+        (should
+         (eq (marker-buffer (cdadar index)) (current-buffer)))))))
+
+(ert-deftest md-mode-goto-heading-keeps-duplicate-titles ()
+  (with-temp-buffer
+    (insert "# Same\nBody\n## Same\n")
+    (md-mode)
+    (cl-letf (((symbol-function 'completing-read)
+               (lambda (_prompt collection &rest _)
+                 (caar (last collection)))))
+      (call-interactively #'md-mode-goto-heading))
+    (should (looking-at "## Same"))))
+
+(ert-deftest md-mode-imenu-handles-empty-and-stale-input ()
+  (with-temp-buffer
+    (md-mode)
+    (should-not (funcall imenu-create-index-function)))
+  (with-temp-buffer
+    (insert "Bad\nGood\n")
+    (md-mode)
+    (put-text-property 1 4 'md-render-source 42)
+    (put-text-property 5 9 'md-render-source "# Good")
+    (md-mode--set-rendered-p t)
+    (should (equal (mapcar #'car (funcall imenu-create-index-function))
+                   '("Good"))))
+  (let ((buffer (generate-new-buffer " *md-mode-imenu-marker*"))
+        marker)
+    (with-current-buffer buffer
+      (insert "# Heading\n")
+      (md-mode)
+      (setq marker
+            (cdar (funcall imenu-create-index-function))))
+    (kill-buffer buffer)
+    (should-not (marker-buffer marker))))
 
 (ert-deftest md-mode-inserts-list-items ()
   (with-temp-buffer

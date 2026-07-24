@@ -35,9 +35,11 @@
 (require 'md-render)
 (require 'browse-url)
 (require 'fringe)
+(require 'imenu)
 (require 'outline)
 (require 'seq)
 (require 'subr-x)
+(require 'text-property-search)
 
 (declare-function hel-keymap-local-set "hel-core" (&rest args))
 
@@ -599,21 +601,90 @@ ignored."
   (md-mode--back-to-heading)
   (outline-backward-same-level (or count 1)))
 
-(defun md-mode--heading-candidates ()
-  "Return completion candidates for Markdown headings."
-  (let (candidates)
+(defun md-mode--heading-entries ()
+  "Return Markdown headings as title, level, and target marker plists."
+  (let (entries)
     (save-excursion
       (goto-char (point-min))
-      (while (md-mode--outline-search)
-        (let* ((level (length (match-string 1)))
-               (title (string-trim
-                       (buffer-substring-no-properties
-                        (point) (line-end-position))))
-               (label (format "%s %s — line %d"
-                              (make-string level ?#)
-                              title (line-number-at-pos))))
-          (push (cons label (match-beginning 0)) candidates))))
-    (nreverse candidates)))
+      (if md-mode--rendered-p
+          (while-let
+              ((match (text-property-search-forward
+                       'md-render-source)))
+            (let ((source (prop-match-value match)))
+              (when (and (stringp source)
+                         (string-match md-mode--heading-regexp source)
+                         (= (match-beginning 0) 0))
+                (push (list
+                       :title (string-trim
+                               (substring source (match-end 0)))
+                       :level (length (match-string 1 source))
+                       :marker (copy-marker
+                                (prop-match-beginning match)))
+                      entries))))
+        (while (md-mode--outline-search)
+          (let* ((level (length (match-string 1)))
+                 (title (string-trim
+                         (buffer-substring-no-properties
+                          (point) (line-end-position)))))
+            (push (list :title title
+                        :level level
+                        :marker (copy-marker (match-beginning 0)))
+                  entries)))))
+    (nreverse entries)))
+
+(defun md-mode--heading-candidates ()
+  "Return completion candidates for Markdown headings."
+  (mapcar
+   (lambda (entry)
+     (let ((level (plist-get entry :level))
+           (title (plist-get entry :title))
+           (marker (plist-get entry :marker)))
+       (cons (format "%s %s — line %d"
+                     (make-string level ?#)
+                     title (line-number-at-pos marker))
+             marker)))
+   (md-mode--heading-entries)))
+
+(defun md-mode--imenu-node (node)
+  "Convert heading tree NODE to an Imenu entry."
+  (let* ((entry (car node))
+         (title (or (plist-get entry :imenu-label)
+                    (plist-get entry :title)))
+         (marker (plist-get entry :marker))
+         (children (mapcar #'md-mode--imenu-node
+                           (reverse (cdr node)))))
+    (if children
+        (cons title (cons (cons title marker) children))
+      (cons title marker))))
+
+(defun md-mode--imenu-index ()
+  "Return a nested Imenu index for the current Markdown buffer."
+  (let ((entries (md-mode--heading-entries))
+        (counts (make-hash-table :test #'equal))
+        roots stack)
+    (dolist (entry entries)
+      (let ((title (plist-get entry :title)))
+        (puthash title (1+ (gethash title counts 0)) counts)))
+    (dolist (entry entries)
+      (let ((title (plist-get entry :title)))
+        (when (> (gethash title counts) 1)
+          (setq entry
+                (plist-put
+                 entry :imenu-label
+                 (format "%s — line %d"
+                         title
+                         (line-number-at-pos
+                          (plist-get entry :marker)))))))
+      (let ((level (plist-get entry :level)))
+        (while (and stack
+                    (>= (plist-get (caar stack) :level) level))
+          (pop stack))
+        (let ((node (list entry)))
+          (if stack
+              (setcdr (car stack) (cons node (cdr (car stack))))
+            (push node roots))
+          (push node stack))))
+    (mapcar #'md-mode--imenu-node (nreverse roots))))
 
 ;;;###autoload
 (defun md-mode-goto-heading (position)
@@ -1709,6 +1780,7 @@ When the region is active, use its lines as the callout body."
   (setq-local syntax-propertize-function #'md-mode--syntax-propertize)
   (setq-local outline-search-function #'md-mode--outline-search)
   (setq-local outline-level #'md-mode--outline-level)
+  (setq-local imenu-create-index-function #'md-mode--imenu-index)
   (add-to-invisibility-spec '(outline . t))
   (when (fboundp 'hel-keymap-local-set)
     (hel-keymap-local-set
