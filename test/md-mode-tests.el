@@ -391,6 +391,127 @@
     (goto-char (point-min))
     (should (equal (get-text-property (point) 'display) "│"))))
 
+(ert-deftest md-mode-creates-standard-table ()
+  (with-temp-buffer
+    (md-mode)
+    (md-mode-insert-table 3 2)
+    (should
+     (equal (buffer-string)
+            (concat "|   |   |   |\n"
+                    "|---|---|---|\n"
+                    "|   |   |   |\n"
+                    "|   |   |   |")))
+    (should (= (line-number-at-pos) 1))
+    (should (= (current-column) 2))))
+
+(ert-deftest md-mode-rejects-invalid-table-creation ()
+  (with-temp-buffer
+    (md-mode)
+    (should-error (md-mode-insert-table 0 2) :type 'user-error)
+    (should-error (md-mode-insert-table 2 0) :type 'user-error)
+    (should-error (md-mode-insert-table "2" 2) :type 'user-error)
+    (insert "# Rendered\n")
+    (md-mode-render)
+    (should-error (md-mode-insert-table 2 2) :type 'user-error))
+  (with-temp-buffer
+    (insert "```text\ninside\n```\n")
+    (md-mode)
+    (goto-char (point-min))
+    (forward-line 1)
+    (should-error (md-mode-insert-table 2 2) :type 'user-error)))
+
+(ert-deftest md-mode-prompts-for-table-size-once ()
+  (with-temp-buffer
+    (md-mode)
+    (cl-letf (((symbol-function 'read-string)
+               (lambda (&rest _) "2 x 1")))
+      (call-interactively #'md-mode-insert-table))
+    (should
+     (equal (buffer-string)
+            (concat "|   |   |\n"
+                    "|---|---|\n"
+                    "|   |   |")))))
+
+(ert-deftest md-mode-deletes-whole-table-only ()
+  (with-temp-buffer
+    (insert (concat "Before\n\n"
+                    "| A | B |\n"
+                    "|---|---|\n"
+                    "| 1 | 2 |\n"
+                    "\nAfter\n"))
+    (md-mode)
+    (goto-char (point-min))
+    (search-forward "A")
+    (md-mode-delete-table)
+    (should (equal (buffer-string) "Before\n\n\nAfter\n"))))
+
+(ert-deftest md-mode-rejects-invalid-table-deletion ()
+  (with-temp-buffer
+    (insert "| A | B |\n| 1 | 2 |\n")
+    (md-mode)
+    (should-error (md-mode-delete-table) :type 'user-error))
+  (with-temp-buffer
+    (insert "| A | B |\n|---|---|\n")
+    (md-mode)
+    (md-mode-render)
+    (should-error (md-mode-delete-table) :type 'user-error)))
+
+(ert-deftest md-mode-table-command-creates-or-aligns ()
+  (with-temp-buffer
+    (md-mode)
+    (should (eq (key-binding (kbd "C-c |")) #'md-mode-table))
+    (cl-letf (((symbol-function 'read-string)
+               (lambda (&rest _) "2 x 1")))
+      (md-mode-table))
+    (should (equal (buffer-string)
+                   "|   |   |\n|---|---|\n|   |   |")))
+  (with-temp-buffer
+    (let ((md-mode-auto-align-tables nil))
+      (insert "| Name | Use |\n|---|---|\n| A | Longer text |\n")
+      (md-mode))
+    (goto-char (point-min))
+    (md-mode-table)
+    (should
+     (equal (buffer-string)
+            (concat "| Name | Use         |\n"
+                    "|------|-------------|\n"
+                    "| A    | Longer text |\n")))))
+
+(ert-deftest md-mode-table-lifecycle-preserves-context ()
+  (with-temp-buffer
+    (insert "Before\n  \nAfter\n")
+    (md-mode)
+    (goto-char (point-min))
+    (forward-line 1)
+    (md-mode-insert-table 2 1)
+    (should
+     (equal (buffer-string)
+            (concat "Before\n"
+                    "  |   |   |\n"
+                    "  |---|---|\n"
+                    "  |   |   |\n"
+                    "After\n"))))
+  (with-temp-buffer
+    (insert "Before")
+    (md-mode)
+    (goto-char (point-max))
+    (md-mode-insert-table 1 1)
+    (should
+     (equal (buffer-string)
+            "Before\n|   |\n|---|\n|   |"))))
+
+(ert-deftest md-mode-table-deletion-is-undoable ()
+  (with-temp-buffer
+    (insert "| A |\n|---|\n| 1 |\n")
+    (md-mode)
+    (buffer-enable-undo)
+    (goto-char (point-min))
+    (setq buffer-undo-list nil)
+    (md-mode-delete-table)
+    (undo-boundary)
+    (undo)
+    (should (equal (buffer-string) "| A |\n|---|\n| 1 |\n"))))
+
 (ert-deftest md-mode-moves-table-rows-and-columns ()
   (with-temp-buffer
     (let ((md-mode-auto-align-tables nil))

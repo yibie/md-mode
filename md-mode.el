@@ -100,6 +100,7 @@
   "C-c C-b" #'md-mode-backward-same-level
   "C-c C-j" #'md-mode-goto-heading
   "C-c C-o" #'md-mode-open-at-point
+  "C-c |" #'md-mode-table
   "C-c -" #'md-mode-cycle-list-marker
   "M-h" #'md-mode-mark-element
   "C-c @" #'md-mode-mark-subtree
@@ -1339,6 +1340,63 @@ When the region is active, use its lines as the callout body."
     (font-lock-flush begin (+ begin (length formatted)))
     (md-mode--goto-table-cell begin row column)))
 
+;;;###autoload
+(defun md-mode-insert-table (columns rows)
+  "Insert a Markdown table with COLUMNS and ROWS body rows."
+  (interactive
+   (let ((size (read-string
+                "Table size (columns x body rows): " nil nil "3 x 2")))
+     (unless
+         (string-match
+          "\\`[ \t]*\\([1-9][0-9]*\\)[ \t]*[xX×][ \t]*\\([1-9][0-9]*\\)[ \t]*\\'"
+          size)
+       (user-error "Invalid table size: %s" size))
+     (list (string-to-number (match-string 1 size))
+           (string-to-number (match-string 2 size)))))
+  (md-mode--ensure-mode)
+  (when md-mode--rendered-p
+    (user-error "Table editing is unavailable in rendered view"))
+  (unless (and (integerp columns) (> columns 0)
+               (integerp rows) (> rows 0))
+    (user-error "Table dimensions are not positive integers"))
+  (when (md-mode--inside-fenced-block-p (point))
+    (user-error "Inside a fenced code block"))
+  (let* ((line (buffer-substring-no-properties
+                (line-beginning-position) (line-end-position)))
+         (blank (string-match-p "\\`[ \t]*\\'" line))
+         (indent (if blank line ""))
+         (body (cons indent (make-list columns "")))
+         (table (md-mode--format-table
+                 (append
+                  (list body
+                        (cons indent (make-list columns "---")))
+                  (make-list rows body))
+                 columns)))
+    (if blank
+        (delete-region (line-beginning-position) (line-end-position))
+      (end-of-line)
+      (insert "\n"))
+    (let ((begin (point)))
+      (insert table)
+      (font-lock-flush begin (point))
+      (goto-char begin)
+      (search-forward "|" (line-end-position))
+      (when (eq (char-after) ?\s)
+        (forward-char)))))
+
+;;;###autoload
+(defun md-mode-delete-table ()
+  "Delete the complete Markdown table at point."
+  (interactive)
+  (md-mode--ensure-mode)
+  (when md-mode--rendered-p
+    (user-error "Table editing is unavailable in rendered view"))
+  (if-let* ((bounds (md-mode--table-bounds)))
+      (progn
+        (delete-region (nth 0 bounds) (nth 1 bounds))
+        (font-lock-flush))
+    (user-error "Not in a Markdown table")))
+
 (defun md-mode--swap-table-cells (row from to)
   "Return ROW with cells FROM and TO exchanged."
   (let* ((cells (vconcat (cdr row)))
@@ -1486,6 +1544,21 @@ When the region is active, use its lines as the callout body."
       (delete-region begin end)
       (insert formatted))
     (+ begin (length formatted))))
+
+;;;###autoload
+(defun md-mode-table ()
+  "Align the table at point, or create one outside a table."
+  (interactive)
+  (md-mode--ensure-mode)
+  (when md-mode--rendered-p
+    (user-error "Table editing is unavailable in rendered view"))
+  (if-let* ((bounds (md-mode--table-bounds)))
+      (let ((begin (nth 0 bounds))
+            end)
+        (save-excursion
+          (setq end (md-mode--align-table-at-point bounds)))
+        (font-lock-flush begin end))
+    (call-interactively #'md-mode-insert-table)))
 
 (defun md-mode--table-cell-index ()
   "Return the zero-based Markdown table cell index at point."
@@ -1665,6 +1738,7 @@ When the region is active, use its lines as the callout body."
       "C-c C-b" #'md-mode-backward-same-level
       "C-c C-j" #'md-mode-goto-heading
       "C-c C-o" #'md-mode-open-at-point
+      "C-c |" #'md-mode-table
       "C-c -" #'md-mode-cycle-list-marker
       "M-h" #'md-mode-mark-element
       "C-c @" #'md-mode-mark-subtree))
