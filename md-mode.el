@@ -4,7 +4,7 @@
 
 ;; Author: LuciusChen
 ;; URL: https://github.com/yibie/md-mode
-;; Version: 0.2.0
+;; Version: 0.3.0
 ;; Package-Requires: ((emacs "29.1"))
 ;; Keywords: wp, convenience
 ;; SPDX-License-Identifier: GPL-3.0-or-later
@@ -34,6 +34,7 @@
 
 (require 'md-render)
 (require 'browse-url)
+(require 'face-remap)
 (require 'fringe)
 (require 'imenu)
 (require 'outline)
@@ -52,6 +53,19 @@
   :type 'boolean
   :group 'md)
 
+(defcustom md-mode-fold-front-matter-on-open nil
+  "When non-nil, fold front matter when entering `md-mode'."
+  :type 'boolean
+  :group 'md)
+
+(defcustom md-mode-use-markdown-mode-faces t
+  "When non-nil, reuse available `markdown-mode' faces.
+
+Only faces that are already defined are reused.  This option does
+not load or require `markdown-mode'."
+  :type 'boolean
+  :group 'md)
+
 (defcustom md-mode-toc-side 'left
   "Side on which to display the Markdown table of contents."
   :type '(choice (const :tag "Left" left)
@@ -66,6 +80,11 @@
 (defface md-mode-callout
   '((t :inherit font-lock-keyword-face :weight bold))
   "Face for GitHub-style Markdown callout markers."
+  :group 'md)
+
+(defface md-mode-markup
+  '((t :inherit shadow))
+  "Face for editable Markdown delimiters."
   :group 'md)
 
 (defvar-local md-mode--rendered-p nil
@@ -178,6 +197,40 @@
   '("NOTE" "TIP" "IMPORTANT" "WARNING" "CAUTION")
   "Supported GitHub-style Markdown callout types.")
 
+(defconst md-mode--markdown-face-alist
+  '((md-mode-markup . markdown-markup-face)
+    (md-render-bold . markdown-bold-face)
+    (md-render-italic . markdown-italic-face)
+    (md-render-strikethrough . markdown-strike-through-face)
+    (md-render-inline-code . markdown-inline-code-face)
+    (md-render-link . markdown-link-face)
+    (md-render-blockquote . markdown-blockquote-face)
+    (md-render-header-1 . markdown-header-face-1)
+    (md-render-header-2 . markdown-header-face-2)
+    (md-render-header-3 . markdown-header-face-3)
+    (md-render-header-4 . markdown-header-face-4)
+    (md-render-header-5 . markdown-header-face-5)
+    (md-render-header-6 . markdown-header-face-6)
+    (md-render-table-header . markdown-table-face)
+    (md-render-table-border . markdown-table-face)
+    (md-render-table-zebra . markdown-table-face)
+    (md-render-source-block . markdown-code-face)
+    (md-render-source-block-language . markdown-language-info-face))
+  "Map md-mode faces to compatible `markdown-mode' faces.")
+
+(defconst md-mode--front-matter-delimiter-regexp
+  "^\\(?:---\\|\\.\\.\\.\\)[ \t]*$"
+  "Regexp matching a Markdown front matter delimiter.")
+
+(defun md-mode--remap-markdown-mode-faces ()
+  "Reuse compatible `markdown-mode' faces in the current buffer."
+  (when md-mode-use-markdown-mode-faces
+    (mapc
+     (pcase-lambda (`(,md-face . ,markdown-face))
+       (when (facep markdown-face)
+         (face-remap-add-relative md-face markdown-face)))
+     md-mode--markdown-face-alist)))
+
 (defun md-mode--inside-fenced-block-p (&optional position)
   "Return non-nil when POSITION or point is inside a fenced code block."
   (let ((end (or position (point)))
@@ -188,6 +241,45 @@
         (while (re-search-forward md-mode--fence-regexp end t)
           (setq inside (not inside)))))
     inside))
+
+(defun md-mode--front-matter-fold-bounds ()
+  "Return fold bounds when point is on the front matter opener."
+  (save-excursion
+    (beginning-of-line)
+    (when (and (= (point) (point-min))
+               (looking-at "^---[ \t]*$"))
+      (forward-line 1)
+      (let ((begin (point)))
+        (when (re-search-forward
+               md-mode--front-matter-delimiter-regexp nil t)
+          (forward-line 1)
+          (cons begin (point)))))))
+
+(defun md-mode--fenced-block-fold-bounds ()
+  "Return fold bounds when point is on a fenced code block opener."
+  (save-excursion
+    (beginning-of-line)
+    (when (and (looking-at md-mode--fence-regexp)
+               (not (md-mode--inside-fenced-block-p (point))))
+      (forward-line 1)
+      (let ((begin (point)))
+        (when (re-search-forward md-mode--fence-regexp nil t)
+          (forward-line 1)
+          (cons begin (point)))))))
+
+(defun md-mode--block-fold-bounds ()
+  "Return front matter or fenced code fold bounds at point."
+  (or (md-mode--front-matter-fold-bounds)
+      (md-mode--fenced-block-fold-bounds)))
+
+(defun md-mode--fold-initial-front-matter ()
+  "Fold front matter according to the current user option."
+  (when md-mode-fold-front-matter-on-open
+    (save-excursion
+      (goto-char (point-min))
+      (when-let* ((bounds (md-mode--front-matter-fold-bounds)))
+        (pcase-let ((`(,begin . ,end) bounds))
+          (outline-flag-region begin end t))))))
 
 (defun md-mode--find-heading (direction)
   "Find a Markdown heading in DIRECTION and return its position."
@@ -1424,31 +1516,35 @@ When the region is active, use its lines as the callout body."
     ("^[ \t]*>[ \t]+\\(\\[!\\(?:NOTE\\|TIP\\|IMPORTANT\\|WARNING\\|CAUTION\\)\\]\\)"
      (1 'md-mode-callout prepend))
     ("^\\(######\\)[ \t]+\\(.+\\)$"
-     (1 'shadow) (2 'md-render-header-6))
+     (1 'md-mode-markup) (2 'md-render-header-6))
     ("^\\(#####\\)[ \t]+\\(.+\\)$"
-     (1 'shadow) (2 'md-render-header-5))
+     (1 'md-mode-markup) (2 'md-render-header-5))
     ("^\\(####\\)[ \t]+\\(.+\\)$"
-     (1 'shadow) (2 'md-render-header-4))
+     (1 'md-mode-markup) (2 'md-render-header-4))
     ("^\\(###\\)[ \t]+\\(.+\\)$"
-     (1 'shadow) (2 'md-render-header-3))
+     (1 'md-mode-markup) (2 'md-render-header-3))
     ("^\\(##\\)[ \t]+\\(.+\\)$"
-     (1 'shadow) (2 'md-render-header-2))
+     (1 'md-mode-markup) (2 'md-render-header-2))
     ("^\\(#\\)[ \t]+\\(.+\\)$"
-     (1 'shadow) (2 'md-render-header-1))
+     (1 'md-mode-markup) (2 'md-render-header-1))
     ("\\(`\\)\\([^`\n]+\\)\\(`\\)"
-     (1 'shadow) (2 'md-render-inline-code) (3 'shadow))
+     (1 'md-mode-markup) (2 'md-render-inline-code)
+     (3 'md-mode-markup))
     ("\\(\\*\\*\\)\\([^*\n]+\\)\\(\\*\\*\\)"
-     (1 'shadow) (2 'md-render-bold) (3 'shadow))
+     (1 'md-mode-markup) (2 'md-render-bold) (3 'md-mode-markup))
     ("\\(__\\)\\([^_\n]+\\)\\(__\\)"
-     (1 'shadow) (2 'md-render-bold) (3 'shadow))
+     (1 'md-mode-markup) (2 'md-render-bold) (3 'md-mode-markup))
     ("\\(~~\\)\\([^~\n]+\\)\\(~~\\)"
-     (1 'shadow) (2 'md-render-strikethrough) (3 'shadow))
+     (1 'md-mode-markup) (2 'md-render-strikethrough)
+     (3 'md-mode-markup))
     ("\\(?:^\\|[^*]\\)\\(\\*\\)\\([^*\n]+\\)\\(\\*\\)"
-     (1 'shadow) (2 'md-render-italic) (3 'shadow))
+     (1 'md-mode-markup) (2 'md-render-italic)
+     (3 'md-mode-markup))
     ("\\(?:^\\|[^[:alnum:]_]\\)\\(_\\)\\([^_\n]+\\)\\(_\\)"
-     (1 'shadow) (2 'md-render-italic) (3 'shadow))
+     (1 'md-mode-markup) (2 'md-render-italic)
+     (3 'md-mode-markup))
     ("!?\\[\\([^]\n]+\\)\\](\\([^) \n]+\\))"
-     (1 'md-render-link) (2 'shadow))
+     (1 'md-render-link) (2 'md-mode-markup))
     ("^[ \t]*>+[ \t]+\\(.+\\)$"
      (1 'md-render-blockquote))
     (md-mode--match-table-header
@@ -1883,14 +1979,15 @@ When the region is active, use its lines as the callout body."
 (defun md-mode-tab ()
   "Cycle a heading, advance in a table, or indent normally."
   (interactive)
-  (let ((bounds (md-mode--table-bounds)))
+  (let ((table-bounds (md-mode--table-bounds))
+        (block-bounds (md-mode--block-fold-bounds)))
     (cond
-     (bounds
-      (let* ((begin (car bounds))
+     (table-bounds
+      (let* ((begin (car table-bounds))
              (row (count-lines begin (line-beginning-position)))
              (column (md-mode--table-cell-index))
-             (columns (nth 2 bounds))
-             (rows (count-lines begin (nth 1 bounds)))
+             (columns (nth 2 table-bounds))
+             (rows (count-lines begin (nth 1 table-bounds)))
              (next-column (1+ column))
              (next-row row))
         (when (or (= row 1) (>= next-column columns))
@@ -1900,15 +1997,30 @@ When the region is active, use its lines as the callout body."
             (setq next-row 2))
           (when (>= next-row rows)
             (setq next-row 0)))
-        (md-mode--align-table-at-point bounds)
+        (md-mode--align-table-at-point table-bounds)
         (md-mode--goto-table-cell begin next-row next-column)
         (font-lock-flush begin (line-end-position))))
+     (block-bounds
+      (md-mode-cycle-block))
      ((md-mode--heading-level-at-point)
       (outline-cycle))
      ((md-mode--list-item-info)
       (md-mode-indent-list-item))
      (t
       (indent-for-tab-command)))))
+
+;;;###autoload
+(defun md-mode-cycle-block ()
+  "Fold or reveal front matter or a fenced code block at point."
+  (interactive)
+  (md-mode--ensure-mode)
+  (when md-mode--rendered-p
+    (user-error "Block folding is unavailable in rendered view"))
+  (if-let* ((bounds (md-mode--block-fold-bounds)))
+      (pcase-let ((`(,begin . ,end) bounds))
+        (outline-flag-region
+         begin end (not (outline-invisible-p begin))))
+    (user-error "Not on a front matter or code block opener")))
 
 ;;;###autoload
 (defun md-mode-backtab ()
@@ -1980,6 +2092,7 @@ When the region is active, use its lines as the callout body."
   (setq-local outline-search-function #'md-mode--outline-search)
   (setq-local outline-level #'md-mode--outline-level)
   (setq-local imenu-create-index-function #'md-mode--imenu-index)
+  (md-mode--remap-markdown-mode-faces)
   (add-to-invisibility-spec '(outline . t))
   (when (fboundp 'hel-keymap-local-set)
     (hel-keymap-local-set
@@ -2030,6 +2143,7 @@ When the region is active, use its lines as the callout body."
             #'md-mode--truncate-tables-in-buffer nil t)
   (jit-lock-register #'md-mode--truncate-tables-in-region)
   (md-mode--auto-align-tables)
+  (md-mode--fold-initial-front-matter)
   (md-mode--truncate-tables-in-buffer))
 
 ;;;###autoload

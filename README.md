@@ -17,7 +17,9 @@ It provides two views of the same buffer:
 
 ## Demo
 
-[Watch the 87-second demo](docs/demo.mp4).
+![Moving and promoting Markdown headings in md-mode](docs/demo.gif)
+
+[Watch the complete 87-second demo](docs/demo.mp4).
 
 ## Why md-mode?
 
@@ -84,6 +86,14 @@ git clone https://github.com/yibie/md-mode.git
 (require 'md-mode)
 ```
 
+For `straight.el` users:
+
+```elisp
+(use-package md-mode
+  :straight (:type git :host github :repo "yibie/md-mode")
+  :mode ("\\.md\\'" . md-mode))
+```
+
 Files ending in `.md` will then open in `md-mode`.
 
 ## Quick start
@@ -91,7 +101,8 @@ Files ending in `.md` will then open in `md-mode`.
 Open a Markdown file and edit normally. The source stays writable and is
 styled as you type.
 
-- Press `TAB` on a heading to fold or reveal its section.
+- Press `TAB` on a heading, front matter opener, or fenced code opener to fold
+  or reveal it.
 - Press `C-c C-c` on `- [ ]` to toggle it to `- [x]`.
 - Press `M-S-RET` to create another task.
 - Press `C-c |` outside a table to create one, or inside a table to align it.
@@ -106,7 +117,7 @@ styled as you type.
 | Key               | Action                                            |
 |-------------------|---------------------------------------------------|
 | C-n / C-p         | Next / previous heading                           |
-| TAB / S-TAB       | Cycle a section / cycle the whole document        |
+| TAB / S-TAB       | Cycle a section or block / cycle the whole document |
 | C-RET             | Insert a same-level heading                       |
 | M-Left / M-Right  | Promote / demote a heading subtree                |
 | M-Up / M-Down     | Move the current heading, list item, or table row |
@@ -174,6 +185,40 @@ affecting Imenu or heading navigation:
 The TOC works in Edit view and Rendered view. Press `RET` or click an entry to
 jump, `g` to refresh manually, and `q` to close its window.
 
+Front matter and fenced code blocks fold with `TAB` on their opening
+delimiter. To start with front matter folded:
+
+```elisp
+(setq md-mode-fold-front-matter-on-open t)
+```
+
+When `markdown-mode` faces are already defined, `md-mode` reuses compatible
+heading, emphasis, link, quote, table, and code faces buffer-locally. It does
+not load or depend on `markdown-mode`. Disable compatibility with:
+
+```elisp
+(setq md-mode-use-markdown-mode-faces nil)
+```
+
+Here is a ready-to-copy configuration with the main commands grouped under
+`C-c m`; replace the keys to match your setup:
+
+```elisp
+(use-package md-mode
+  :straight (:type git :host github :repo "yibie/md-mode")
+  :mode ("\\.md\\'" . md-mode)
+  :bind (:map md-mode-map
+              ("C-c m v" . md-mode-toggle-markup)
+              ("C-c m t" . md-mode-toggle-toc)
+              ("C-c m j" . md-mode-goto-heading)
+              ("C-c m b" . md-mode-cycle-block)
+              ("C-c m |" . md-mode-table))
+  :custom
+  (md-mode-fold-front-matter-on-open t)
+  (md-mode-toc-side 'left)
+  (md-mode-toc-width 30))
+```
+
 Use `M-x customize-group RET md RET` for editing behavior and
 `M-x customize-group RET md-render RET` for renderer faces and options.
 
@@ -185,6 +230,9 @@ GitHub-style authoring and associates itself with `.md` files.
 
 Browser preview, HTML export, wiki links, footnotes, and the broader dialect
 coverage of `markdown-mode` are outside its present scope.
+
+Fenced code receives a block face in Edit view. Language-specific syntax
+highlighting remains a Rendered-view feature.
 
 The TOC, Imenu, and structural commands index ATX headings (`#` through
 `######`) in the current buffer only. Setext headings and project-wide indexes

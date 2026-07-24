@@ -67,6 +67,21 @@
   (should (> (face-attribute 'md-render-header-2 :height nil nil)
              (face-attribute 'md-render-header-3 :height nil nil))))
 
+(ert-deftest md-mode-reuses-available-markdown-mode-faces ()
+  (let ((md-mode-use-markdown-mode-faces t)
+        remappings)
+    (cl-letf (((symbol-function 'facep)
+               (lambda (face &optional _frame)
+                 (eq face 'markdown-bold-face)))
+              ((symbol-function 'face-remap-add-relative)
+               (lambda (&rest remapping)
+                 (push remapping remappings))))
+      (with-temp-buffer
+        (md-mode--remap-markdown-mode-faces)))
+    (should
+     (equal remappings
+            '((md-render-bold markdown-bold-face))))))
+
 (ert-deftest md-mode-heading-navigation-skips-fenced-code ()
   (with-temp-buffer
     (insert "# One\ntext\n```markdown\n# Not a heading\n```\n## Two\n### Three\n")
@@ -486,6 +501,33 @@
     (should (looking-at "# Next"))
     (md-mode-backward-same-level)
     (should (looking-at "# Root"))))
+
+(ert-deftest md-mode-folds-front-matter-and-fenced-code ()
+  (with-temp-buffer
+    (insert (concat "---\ntitle: Example\ntags: [one, two]\n---\n"
+                    "# Heading\n```elisp\n(message \"hello\")\n```\n"))
+    (md-mode)
+    (set-buffer-modified-p nil)
+    (goto-char (point-min))
+    (md-mode-tab)
+    (should (outline-invisible-p (line-beginning-position 2)))
+    (should-not (buffer-modified-p))
+    (md-mode-tab)
+    (should-not (outline-invisible-p (line-beginning-position 2)))
+    (search-forward "```elisp")
+    (beginning-of-line)
+    (md-mode-tab)
+    (should (outline-invisible-p (line-beginning-position 2)))
+    (md-mode-tab)
+    (should-not (outline-invisible-p (line-beginning-position 2)))))
+
+(ert-deftest md-mode-optionally-folds-front-matter-on-open ()
+  (with-temp-buffer
+    (let ((md-mode-fold-front-matter-on-open t))
+      (insert "---\ntitle: Example\n---\n# Heading\n")
+      (md-mode)
+      (goto-char (point-min))
+      (should (outline-invisible-p (line-beginning-position 2))))))
 
 (ert-deftest md-mode-org-style-key-bindings ()
   (with-temp-buffer
