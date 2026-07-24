@@ -251,6 +251,114 @@
           (kill-buffer toc))
         (kill-buffer source)))))
 
+(ert-deftest md-mode-toc-refreshes-once-after-source-edits ()
+  (save-window-excursion
+    (let ((source (generate-new-buffer " *md-mode-toc-live*"))
+          toc marker)
+      (unwind-protect
+          (progn
+            (set-window-buffer (selected-window) source)
+            (with-current-buffer source
+              (insert "# One\n")
+              (md-mode)
+              (md-mode-toggle-toc)
+              (setq toc md-mode--toc-buffer)
+              (goto-char (point-max))
+              (insert "## Two\n")
+              (should md-mode--toc-dirty-p)
+              (with-current-buffer toc
+                (should (equal (buffer-string) "One\n")))
+              (md-mode--toc-refresh-if-dirty)
+              (should-not md-mode--toc-dirty-p))
+            (with-current-buffer toc
+              (should (equal (buffer-string) "One\n  Two\n"))
+              (setq marker (car md-mode--toc-markers)))
+            (with-current-buffer source
+              (md-mode--toc-refresh-if-dirty))
+            (with-current-buffer toc
+              (should (eq (car md-mode--toc-markers) marker))
+              (let ((md-mode--toc-refreshing-p t))
+                (md-mode--toc-refresh))
+              (should (eq (car md-mode--toc-markers) marker))))
+        (when (buffer-live-p toc)
+          (kill-buffer toc))
+        (kill-buffer source)))))
+
+(ert-deftest md-mode-toc-refreshes-across-rendered-view ()
+  (save-window-excursion
+    (let ((source (generate-new-buffer " *md-mode-toc-view*"))
+          toc source-marker view-marker)
+      (unwind-protect
+          (progn
+            (set-window-buffer (selected-window) source)
+            (with-current-buffer source
+              (insert "# Root\n## Child\n")
+              (md-mode)
+              (md-mode-toggle-toc)
+              (setq toc md-mode--toc-buffer))
+            (with-current-buffer toc
+              (setq source-marker (car md-mode--toc-markers)))
+            (with-current-buffer source
+              (md-mode-render))
+            (should-not (marker-buffer source-marker))
+            (with-current-buffer toc
+              (should (equal (buffer-string) "Root\n  Child\n"))
+              (setq view-marker (car md-mode--toc-markers))
+              (should (marker-position view-marker)))
+            (with-current-buffer source
+              (md-mode-show-source))
+            (should-not (marker-buffer view-marker))
+            (with-current-buffer toc
+              (should (equal (buffer-string) "Root\n  Child\n"))))
+        (when (buffer-live-p toc)
+          (kill-buffer toc))
+        (kill-buffer source)))))
+
+(ert-deftest md-mode-source-kill-cleans-up-toc ()
+  (save-window-excursion
+    (let ((source (generate-new-buffer " *md-mode-toc-kill-source*"))
+          toc marker)
+      (set-window-buffer (selected-window) source)
+      (with-current-buffer source
+        (insert "# Heading\n")
+        (md-mode)
+        (md-mode-toggle-toc)
+        (setq toc md-mode--toc-buffer))
+      (with-current-buffer toc
+        (setq marker (car md-mode--toc-markers)))
+      (kill-buffer source)
+      (should-not (buffer-live-p toc))
+      (should-not (marker-buffer marker))
+      (should-not (get-buffer-window toc)))))
+
+(ert-deftest md-mode-toc-detaches-on-direct-kill-and-mode-change ()
+  (save-window-excursion
+    (let ((source (generate-new-buffer " *md-mode-toc-detach*"))
+          toc toc-window replacement)
+      (unwind-protect
+          (progn
+            (set-window-buffer (selected-window) source)
+            (with-current-buffer source
+              (insert "# Heading\n")
+              (md-mode)
+              (md-mode-toggle-toc)
+              (setq toc md-mode--toc-buffer
+                    toc-window (get-buffer-window toc)))
+            (kill-buffer toc)
+            (should-not (window-live-p toc-window))
+            (with-current-buffer source
+              (should-not md-mode--toc-buffer)
+              (should-not md-mode--toc-dirty-p)
+              (md-mode-toggle-toc)
+              (setq replacement md-mode--toc-buffer)
+              (md-mode-render)
+              (fundamental-mode)
+              (should (equal (buffer-string) "# Heading\n")))
+            (should-not (buffer-live-p replacement)))
+        (when (buffer-live-p replacement)
+          (kill-buffer replacement))
+        (kill-buffer source)))))
+
 (ert-deftest md-mode-inserts-list-items ()
   (with-temp-buffer
     (insert "7. ordered")

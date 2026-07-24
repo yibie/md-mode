@@ -83,6 +83,12 @@
 (defvar-local md-mode--toc-markers nil
   "Heading markers currently displayed in this TOC buffer.")
 
+(defvar-local md-mode--toc-dirty-p nil
+  "Non-nil when the associated TOC needs to be refreshed.")
+
+(defvar-local md-mode--toc-refreshing-p nil
+  "Non-nil while the current TOC buffer is being rebuilt.")
+
 (define-fringe-bitmap
   'md-mode--table-overflow-dots
   [0 0 0 0 0 0 0 0 0 0 0 219 219] nil nil 'center)
@@ -104,7 +110,8 @@
 
 (define-derived-mode md-mode--toc-mode special-mode "MD TOC"
   "Major mode for a Markdown table of contents."
-  (setq-local truncate-lines t))
+  (setq-local truncate-lines t)
+  (add-hook 'kill-buffer-hook #'md-mode--toc-detach nil t))
 
 (defvar-keymap md-mode-map
   :parent text-mode-map
@@ -730,42 +737,94 @@ ignored."
         (setq md-mode--toc-source-buffer source))))
   md-mode--toc-buffer)
 
+(defun md-mode--toc-release-markers ()
+  "Release all heading markers owned by the current TOC buffer."
+  (dolist (marker md-mode--toc-markers)
+    (set-marker marker nil))
+  (setq md-mode--toc-markers nil))
+
 (defun md-mode--toc-refresh ()
   "Refresh the current Markdown TOC buffer."
   (interactive)
   (unless (derived-mode-p 'md-mode--toc-mode)
     (user-error "Not in an md-mode TOC"))
-  (dolist (marker md-mode--toc-markers)
-    (set-marker marker nil))
-  (setq md-mode--toc-markers nil)
+  (unless md-mode--toc-refreshing-p
+    (let ((md-mode--toc-refreshing-p t))
+      (md-mode--toc-release-markers)
+      (let ((source md-mode--toc-source-buffer)
+            (inhibit-read-only t))
+        (erase-buffer)
+        (if (not (buffer-live-p source))
+            (insert "Source buffer is no longer available.\n")
+          (setq-local header-line-format
+                      (format " %s" (buffer-name source)))
+          (let ((entries
+                 (with-current-buffer source
+                   (md-mode--heading-entries))))
+            (if (not entries)
+                (insert "No headings.\n")
+              (dolist (entry entries)
+                (let* ((level (plist-get entry :level))
+                       (marker (plist-get entry :marker))
+                       (begin (point)))
+                  (insert (make-string (* 2 (1- level)) ?\s)
+                          (plist-get entry :title)
+                          "\n")
+                  (add-text-properties
+                   begin (1- (point))
+                   `(md-mode-toc-target ,marker
+                     mouse-face highlight
+                     help-echo "RET or mouse-1: visit heading"
+                     face ,(intern
+                            (format "outline-%d" (min level 8)))))
+                  (push marker md-mode--toc-markers))))))
+        (when (buffer-live-p source)
+          (with-current-buffer source
+            (setq md-mode--toc-dirty-p nil))))
+      (goto-char (point-min)))))
+
+(defun md-mode--toc-mark-dirty (_begin _end _length)
+  "Mark the current source buffer's TOC dirty after a change."
+  (when (and (buffer-live-p md-mode--toc-buffer)
+             (get-buffer-window md-mode--toc-buffer t))
+    (setq md-mode--toc-dirty-p t)))
+
+(defun md-mode--toc-refresh-if-dirty ()
+  "Refresh the current source buffer's TOC when it is dirty."
+  (when (and md-mode--toc-dirty-p
+             (buffer-live-p md-mode--toc-buffer))
+    (with-current-buffer md-mode--toc-buffer
+      (md-mode--toc-refresh))))
+
+(defun md-mode--refresh-toc ()
+  "Refresh the current source buffer's TOC when it is live."
+  (when (buffer-live-p md-mode--toc-buffer)
+    (with-current-buffer md-mode--toc-buffer
+      (md-mode--toc-refresh))))
+
+(defun md-mode--toc-detach ()
+  "Detach the current TOC buffer from its Markdown source."
+  (md-mode--toc-release-markers)
   (let ((source md-mode--toc-source-buffer)
-        (inhibit-read-only t))
-    (erase-buffer)
-    (if (not (buffer-live-p source))
-        (insert "Source buffer is no longer available.\n")
-      (setq header-line-format
-            (format " %s" (buffer-name source)))
-      (let ((entries
-             (with-current-buffer source
-               (md-mode--heading-entries))))
-        (if (not entries)
-            (insert "No headings.\n")
-          (dolist (entry entries)
-            (let* ((level (plist-get entry :level))
-                   (marker (plist-get entry :marker))
-                   (begin (point)))
-              (insert (make-string (* 2 (1- level)) ?\s)
-                      (plist-get entry :title)
-                      "\n")
-              (add-text-properties
-               begin (1- (point))
-               `(md-mode-toc-target ,marker
-                 mouse-face highlight
-                 help-echo "RET or mouse-1: visit heading"
-                 face ,(intern
-                        (format "outline-%d" (min level 8)))))
-              (push marker md-mode--toc-markers)))))))
-  (goto-char (point-min)))
+        (toc (current-buffer)))
+    (setq md-mode--toc-source-buffer nil)
+    (when (buffer-live-p source)
+      (with-current-buffer source
+        (when (eq md-mode--toc-buffer toc)
+          (setq md-mode--toc-buffer nil
+                md-mode--toc-dirty-p nil))))))
+
+(defun md-mode--toc-cleanup ()
+  "Remove the TOC associated with the current Markdown source buffer."
+  (let ((toc md-mode--toc-buffer))
+    (setq md-mode--toc-buffer nil
+          md-mode--toc-dirty-p nil)
+    (when (buffer-live-p toc)
+      (with-current-buffer toc
+        (setq md-mode--toc-source-buffer nil)
+        (md-mode--toc-release-markers))
+      (delete-windows-on toc)
+      (kill-buffer toc))))
 
 (defun md-mode--toc-target-at-point ()
   "Return the heading marker on the current TOC line."
@@ -1873,7 +1932,8 @@ When the region is active, use its lines as the callout body."
         (md-render-replace-markup :force t))
       (setq md-mode--source-point source-point)
       (md-mode--set-rendered-p t)
-      (set-buffer-modified-p modified))))
+      (set-buffer-modified-p modified)
+      (md-mode--refresh-toc))))
 
 ;;;###autoload
 (defun md-mode-show-source ()
@@ -1892,7 +1952,8 @@ When the region is active, use its lines as the callout body."
       (md-mode--set-rendered-p nil)
       (goto-char (min (or source-point (point-min)) (point-max)))
       (setq md-mode--source-point nil)
-      (set-buffer-modified-p modified))))
+      (set-buffer-modified-p modified)
+      (md-mode--refresh-toc))))
 
 ;;;###autoload
 (defun md-mode-toggle-markup ()
@@ -1952,10 +2013,14 @@ When the region is active, use its lines as the callout body."
       "C-c @" #'md-mode-mark-subtree))
   (add-hook 'syntax-propertize-extend-region-functions
             #'md-mode--syntax-propertize-extend-region nil t)
+  (add-hook 'after-change-functions #'md-mode--toc-mark-dirty nil t)
+  (add-hook 'post-command-hook #'md-mode--toc-refresh-if-dirty nil t)
   (add-hook 'before-save-hook #'md-mode-show-source nil t)
   (add-hook 'before-revert-hook #'md-mode-show-source nil t)
   (add-hook 'change-major-mode-hook #'md-mode-show-source nil t)
   (add-hook 'change-major-mode-hook #'md-mode--stop-table-overflow nil t)
+  (add-hook 'change-major-mode-hook #'md-mode--toc-cleanup nil t)
+  (add-hook 'kill-buffer-hook #'md-mode--toc-cleanup nil t)
   (add-hook 'window-configuration-change-hook
             #'md-mode--truncate-tables-in-buffer nil t)
   (add-hook 'text-scale-mode-hook
