@@ -686,15 +686,15 @@ ignored."
 
 (defun md-mode--imenu-node (node)
   "Convert heading tree NODE to an Imenu entry."
-  (let* ((entry (car node))
-         (title (or (plist-get entry :imenu-label)
-                    (plist-get entry :title)))
-         (marker (plist-get entry :marker))
-         (children (mapcar #'md-mode--imenu-node
-                           (reverse (cdr node)))))
-    (if children
-        (cons title (cons (cons title marker) children))
-      (cons title marker))))
+  (pcase-let ((`(,entry . ,child-nodes) node))
+    (let* ((title (or (plist-get entry :imenu-label)
+                      (plist-get entry :title)))
+           (marker (plist-get entry :marker))
+           (children (mapcar #'md-mode--imenu-node
+                             (reverse child-nodes))))
+      (if children
+          (cons title (cons (cons title marker) children))
+        (cons title marker)))))
 
 (defun md-mode--imenu-index ()
   "Return a nested Imenu index for the current Markdown buffer."
@@ -716,11 +716,15 @@ ignored."
                           (plist-get entry :marker)))))))
       (let ((level (plist-get entry :level)))
         (while (and stack
-                    (>= (plist-get (caar stack) :level) level))
+                    (pcase-let* ((`(,parent-node . ,_) stack)
+                                 (`(,parent-entry . ,_) parent-node))
+                      (>= (plist-get parent-entry :level) level)))
           (pop stack))
         (let ((node (list entry)))
           (if stack
-              (setcdr (car stack) (cons node (cdr (car stack))))
+              (pcase-let* ((`(,parent-node . ,_) stack)
+                           (`(,_ . ,children) parent-node))
+                (setcdr parent-node (cons node children)))
             (push node roots))
           (push node stack))))
     (mapcar #'md-mode--imenu-node (nreverse roots))))
@@ -791,10 +795,8 @@ ignored."
 
 (defun md-mode--toc-refresh-if-dirty ()
   "Refresh the current source buffer's TOC when it is dirty."
-  (when (and md-mode--toc-dirty-p
-             (buffer-live-p md-mode--toc-buffer))
-    (with-current-buffer md-mode--toc-buffer
-      (md-mode--toc-refresh))))
+  (when md-mode--toc-dirty-p
+    (md-mode--refresh-toc)))
 
 (defun md-mode--refresh-toc ()
   "Refresh the current source buffer's TOC when it is live."
@@ -1630,12 +1632,12 @@ When the region is active, use its lines as the callout body."
                 (line-beginning-position) (line-end-position)))
          (blank (string-match-p "\\`[ \t]*\\'" line))
          (indent (if blank line ""))
-         (body (cons indent (make-list columns "")))
+         (empty-row (cons indent (make-list columns "")))
          (table (md-mode--format-table
                  (append
-                  (list body
+                  (list empty-row
                         (cons indent (make-list columns "---")))
-                  (make-list rows body))
+                  (make-list rows empty-row))
                  columns)))
     (if blank
         (delete-region (line-beginning-position) (line-end-position))
@@ -1759,11 +1761,12 @@ When the region is active, use its lines as the callout body."
   (interactive)
   (md-mode--ensure-mode)
   (if-let* ((context (md-mode--table-context)))
-      (let* ((rows (plist-get context :rows))
-             (row (max 2 (1+ (plist-get context :row))))
-             (new-row
-              (cons (caar rows)
-                    (make-list (plist-get context :columns) ""))))
+      (pcase-let* ((rows (plist-get context :rows))
+                   (`((,indent . ,_) . ,_) rows)
+                   (row (max 2 (1+ (plist-get context :row))))
+                   (new-row
+                    (cons indent
+                          (make-list (plist-get context :columns) ""))))
         (md-mode--replace-table-rows
          (plist-get context :bounds)
          (append (seq-take rows row)

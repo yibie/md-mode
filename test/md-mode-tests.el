@@ -35,10 +35,12 @@
   "Return INDEX titles and hierarchy without target markers."
   (mapcar
    (lambda (entry)
-     (if (markerp (cdr entry))
-         (car entry)
-       (cons (car entry)
-             (md-mode-tests--imenu-shape (cddr entry)))))
+     (pcase-let ((`(,title . ,target) entry))
+       (if (markerp target)
+           title
+         (pcase-let ((`(,_self . ,children) target))
+           (cons title
+                 (md-mode-tests--imenu-shape children))))))
    index))
 
 (ert-deftest md-mode-opens-in-editable-styled-source ()
@@ -87,19 +89,24 @@
                     "```text\n# Hidden\n```\n"))
     (md-mode)
     (should (eq imenu-create-index-function #'md-mode--imenu-index))
-    (let* ((index (funcall imenu-create-index-function))
-           (root (car index))
-           (children (cddr root))
-           (first-child (car children)))
-      (should (equal (mapcar #'car index) '("Root" "Next")))
-      (should (= (length children) 2))
-      (should (string-prefix-p "Child" (caar children)))
-      (should (string-prefix-p "Child" (caadr children)))
-      (should-not (equal (caar children) (caadr children)))
-      (should (equal (mapcar #'car (cddr first-child))
+    (pcase-let* ((`(,root ,next)
+                   (funcall imenu-create-index-function))
+                  (`(,root-label ,root-target
+                     ,first-child ,second-child)
+                   root)
+                  (`(,next-label . ,_) next)
+                  (`(,first-label ,_first-target . ,deep-children)
+                   first-child)
+                  (`(,second-label . ,_) second-child)
+                  (`(,_ . ,root-marker) root-target))
+      (should (equal (list root-label next-label) '("Root" "Next")))
+      (should (string-prefix-p "Child" first-label))
+      (should (string-prefix-p "Child" second-label))
+      (should-not (equal first-label second-label))
+      (should (equal (mapcar #'car deep-children)
                      '("Deep")))
-      (should (marker-position (cdadr root)))
-      (should (eq (marker-buffer (cdadr root)) (current-buffer))))))
+      (should (marker-position root-marker))
+      (should (eq (marker-buffer root-marker) (current-buffer))))))
 
 (ert-deftest md-mode-imenu-matches-rendered-view ()
   (with-temp-buffer
@@ -115,8 +122,10 @@
       (md-mode-render)
       (let ((index (funcall imenu-create-index-function)))
         (should (equal (md-mode-tests--imenu-shape index) shape))
-        (should
-         (eq (marker-buffer (cdadar index)) (current-buffer)))))))
+        (pcase-let* ((`(,root . ,_) index)
+                     (`(,_ ,target . ,_) root)
+                     (`(,_ . ,marker) target))
+          (should (eq (marker-buffer marker) (current-buffer))))))))
 
 (ert-deftest md-mode-goto-heading-keeps-duplicate-titles ()
   (with-temp-buffer
@@ -124,7 +133,8 @@
     (md-mode)
     (cl-letf (((symbol-function 'completing-read)
                (lambda (_prompt collection &rest _)
-                 (caar (last collection)))))
+                 (pcase-let ((`((,choice . ,_)) (last collection)))
+                   choice))))
       (call-interactively #'md-mode-goto-heading))
     (should (looking-at "## Same"))))
 
@@ -145,8 +155,9 @@
     (with-current-buffer buffer
       (insert "# Heading\n")
       (md-mode)
-      (setq marker
-            (cdar (funcall imenu-create-index-function))))
+      (pcase-let* ((`(,entry) (funcall imenu-create-index-function))
+                   (`(,_ . ,entry-marker) entry))
+        (setq marker entry-marker)))
     (kill-buffer buffer)
     (should-not (marker-buffer marker))))
 
