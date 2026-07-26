@@ -1042,6 +1042,38 @@
                   md-mode-tests--source)))
       (delete-file file))))
 
+(ert-deftest md-mode-render-ignores-stale-visited-file ()
+  "Toggling views must not trip the supersession check.
+When an external tool rewrites the visited file (docs regenerated
+while previewing), the buffer is stale; rendering and the
+`before-revert-hook' source restore are view changes, not edits, so
+they must not raise the \"changed on disk; really edit the
+buffer?\" conflict (a hard error in batch)."
+  (let ((file (make-temp-file "md-mode-test-" nil ".md")))
+    (unwind-protect
+        (with-current-buffer (find-file-noselect file)
+          (insert md-mode-tests--source)
+          (save-buffer)
+          (md-mode)
+          ;; Rewrite the file behind the buffer's back.
+          (write-region "# Regenerated\n\nNew **body**.\n" nil file)
+          ;; First render on a stale buffer must succeed.
+          (md-mode-render)
+          (should md-mode--rendered-p)
+          ;; Auto-revert path: show-source runs from `before-revert-hook'
+          ;; on the stale buffer, then the revert loads the new content.
+          (revert-buffer :ignore-auto :noconfirm :preserve-modes)
+          (should-not md-mode--rendered-p)
+          (should (equal (buffer-string) "# Regenerated\n\nNew **body**.\n"))
+          ;; And the next render picks up the reverted content.
+          (md-mode-render)
+          (should md-mode--rendered-p)
+          (goto-char (point-min))
+          (should-not (search-forward "**" nil t))
+          (set-buffer-modified-p nil)
+          (kill-buffer))
+      (delete-file file))))
+
 (ert-deftest md-mode-change-major-mode-restores-source ()
   (with-temp-buffer
     (insert md-mode-tests--source)

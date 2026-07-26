@@ -2041,7 +2041,14 @@ When the region is active, use its lines as the callout body."
     (let ((modified (buffer-modified-p))
           (source-point (point))
           (buffer-undo-list t)
-          (inhibit-read-only t))
+          (inhibit-read-only t)
+          ;; Rendering is a view change, not an edit: a nil
+          ;; `buffer-file-name' skips the supersession prompt ("changed
+          ;; on disk; really edit the buffer?") that would otherwise
+          ;; abort the first render after an external tool rewrites the
+          ;; visited file (e.g. a doc regenerated while previewing).
+          (buffer-file-name nil)
+          (buffer-file-truename nil))
       (save-restriction
         (widen)
         (md-render-replace-markup :force t))
@@ -2058,7 +2065,13 @@ When the region is active, use its lines as the callout body."
     (let ((modified (buffer-modified-p))
           (source-point md-mode--source-point)
           (buffer-undo-list t)
-          (inhibit-read-only t))
+          (inhibit-read-only t)
+          ;; Restoring source is a view change, not an edit — see
+          ;; `md-mode-render'.  This also runs from `before-revert-hook',
+          ;; where the visited file is stale by definition and the
+          ;; supersession prompt would block the revert.
+          (buffer-file-name nil)
+          (buffer-file-truename nil))
       (save-restriction
         (widen)
         (let ((source (md-render-reconstruct (point-min) (point-max))))
