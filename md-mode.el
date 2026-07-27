@@ -134,8 +134,6 @@ not load or require `markdown-mode'."
 
 (defvar-keymap md-mode-map
   :parent text-mode-map
-  "C-n" #'md-mode-next-heading
-  "C-p" #'md-mode-previous-heading
   "M-RET" #'md-mode-insert-list-item
   "M-S-RET" #'md-mode-insert-todo-item
   "M-S-<return>" #'md-mode-insert-todo-item
@@ -2110,8 +2108,6 @@ When the region is active, use its lines as the callout body."
   (when (fboundp 'hel-keymap-local-set)
     (hel-keymap-local-set
       :state 'normal
-      "C-n" #'md-mode-next-heading
-      "C-p" #'md-mode-previous-heading
       "M-RET" #'md-mode-insert-list-item
       "M-S-RET" #'md-mode-insert-todo-item
       "M-S-<return>" #'md-mode-insert-todo-item

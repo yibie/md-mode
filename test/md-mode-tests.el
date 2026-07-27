@@ -532,8 +532,8 @@
 (ert-deftest md-mode-org-style-key-bindings ()
   (with-temp-buffer
     (md-mode)
-    (should (eq (key-binding (kbd "C-n")) #'md-mode-next-heading))
-    (should (eq (key-binding (kbd "C-p")) #'md-mode-previous-heading))
+    (should (eq (key-binding (kbd "C-n")) #'next-line))
+    (should (eq (key-binding (kbd "C-p")) #'previous-line))
     (should (eq (key-binding (kbd "M-RET")) #'md-mode-insert-list-item))
     (should (eq (key-binding (kbd "M-S-RET"))
                 #'md-mode-insert-todo-item))

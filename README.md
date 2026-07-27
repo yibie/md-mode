@@ -116,7 +116,7 @@ styled as you type.
 
 | Key               | Action                                            |
 |-------------------|---------------------------------------------------|
-| C-n / C-p         | Next / previous heading                           |
+| C-c C-n / C-c C-p | Next / previous heading                           |
 | TAB / S-TAB       | Cycle a section or block / cycle the whole document |
 | C-RET             | Insert a same-level heading                       |
 | M-Left / M-Right  | Promote / demote a heading subtree                |
