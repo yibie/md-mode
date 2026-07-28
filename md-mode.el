@@ -8,7 +8,7 @@
 ;; Package-Requires: ((emacs "29.1"))
 ;; Keywords: wp, convenience
 ;; SPDX-License-Identifier: GPL-3.0-or-later
-;; Assisted-by: Codex
+;; Assisted-by: Codex:gpt-5.5
 
 ;; This file is free software; you can redistribute it and/or modify
 ;; it under the terms of the GNU General Public License as published by
@@ -215,6 +215,53 @@ not load or require `markdown-mode'."
     (md-render-source-block . markdown-code-face)
     (md-render-source-block-language . markdown-language-info-face))
   "Map md-mode faces to compatible `markdown-mode' faces.")
+
+(defconst md-mode--heading-faces
+  '(md-render-header-1
+    md-render-header-2
+    md-render-header-3
+    md-render-header-4
+    md-render-header-5
+    md-render-header-6)
+  "Faces used for rendered Markdown headings.")
+
+(defun md-mode--scale-heading-fallback-font ()
+  "Let fallback fonts follow Markdown heading face heights."
+  (when-let* ((window (get-buffer-window (current-buffer) t))
+              (frame (window-frame window))
+              ((display-graphic-p
+                (frame-parameter frame 'display)))
+              (han-position
+               (save-excursion
+                 (goto-char (point-min))
+                 (catch 'han
+                   (while (< (point) (point-max))
+                     (when (eq (aref char-script-table (char-after)) 'han)
+                       (throw 'han (point)))
+                     (forward-char 1)))))
+              (han-font (font-at han-position window))
+              (han-family (font-get han-font :family)))
+    (let* ((fontsets
+            (delete-dups
+             (delq nil
+                   (mapcar
+                    (lambda (face)
+                      (let ((fontset
+                             (face-attribute
+                              face :fontset frame 'default)))
+                        (and (stringp fontset) fontset)))
+                    md-mode--heading-faces))))
+           (configuration (cons han-family fontsets))
+           (cached
+            (frame-parameter frame 'md-mode--heading-fonts-cache)))
+      (when (and fontsets (not (equal configuration cached)))
+        (dolist (fontset fontsets)
+          (set-fontset-font
+           fontset 'han (font-spec :family han-family)
+           frame 'prepend))
+        (set-frame-parameter
+         frame 'md-mode--heading-fonts-cache configuration)
+        (redraw-frame frame)))))
 
 (defconst md-mode--front-matter-delimiter-regexp
   "^\\(?:---\\|\\.\\.\\.\\)[ \t]*$"
@@ -1407,6 +1454,38 @@ When the region is active, use its lines as the callout body."
           (setq matched t))))
     matched))
 
+(defun md-mode--match-table-padding (limit)
+  "Find table padding before LIMIT and align its following pipe."
+  (let (matched)
+    (while (and (not matched)
+                (re-search-forward "[ \t]+|" limit t))
+      (let ((begin (match-beginning 0))
+            (pipe (1- (match-end 0))))
+        (when (and (md-mode--table-line-p)
+                   (not (md-mode--table-separator-line-p))
+                   (not (md-mode--escaped-p pipe)))
+          (when (and (display-graphic-p)
+                     (fboundp 'string-pixel-width))
+            (let* ((line-begin (line-beginning-position))
+                   (columns
+                    (string-width
+                     (buffer-substring-no-properties line-begin pipe)))
+                   (target (* columns
+                              (string-pixel-width
+                               (propertize " " 'face 'fixed-pitch))))
+                   (content
+                    (string-pixel-width
+                     (buffer-substring line-begin begin)))
+                   (padding (- target content)))
+              (when (> padding 0)
+                (with-silent-modifications
+                  (put-text-property
+                   begin pipe 'display
+                   `(space :width (,padding)))))))
+          (set-match-data (list begin pipe))
+          (setq matched t))))
+    matched))
+
 ;; Adapted from lte.el's window-local overlay model:
 ;; https://github.com/fredericgiquel/lte.el
 (defun md-mode--visual-line-end-position ()
@@ -1550,7 +1629,8 @@ When the region is active, use its lines as the callout body."
     (md-mode--match-table-marker
      (0 'md-render-table-border prepend))
     (md-mode--match-table-row
-     (0 'fixed-pitch append)))
+     (0 'fixed-pitch prepend))
+    md-mode--match-table-padding)
   "Font-lock rules for editable Markdown source.")
 
 (defun md-mode--ensure-mode ()
@@ -2052,6 +2132,7 @@ When the region is active, use its lines as the callout body."
         (md-render-replace-markup :force t))
       (setq md-mode--source-point source-point)
       (md-mode--set-rendered-p t)
+      (md-mode--scale-heading-fallback-font)
       (set-buffer-modified-p modified)
       (md-mode--refresh-toc))))
 

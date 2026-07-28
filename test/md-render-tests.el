@@ -695,6 +695,22 @@ after" nil)))))
 │ Alice │ Engineer │
 │ Bob   │ Manager  │")))
 
+(ert-deftest md-render-table-measures-row-faces-before-padding ()
+  (with-temp-buffer
+    (insert "| 类型 | 值 |\n|---|---|\n| Secret | token |\n| Variable | branch |")
+    (let* ((rows (md-render--collect-table-rows))
+           (processed
+            (map-elt
+             (md-render--preprocess-table
+              :rows rows :separator-row-num 1)
+             :processed-rows)))
+      (should
+       (eq (get-text-property 0 'face (cadr (nth 0 processed)))
+           'md-render-table-header))
+      (should
+       (eq (get-text-property 0 'face (cadr (nth 3 processed)))
+           'md-render-table-zebra)))))
+
 (ert-deftest md-render-convert-table-output-wraps-one-cell ()
   ;; When the table's natural width exceeds the target, the widest
   ;; column shrinks and its content wraps at word boundaries.

@@ -1975,6 +1975,18 @@ WINDOW supplies the active display metrics."
   (make-string width
                (if md-render-table-use-unicode-borders ?─ ?-)))
 
+(defun md-render--table-row-face (row separator-row-num data-row-num)
+  "Return the display face for ROW at DATA-ROW-NUM.
+SEPARATOR-ROW-NUM identifies the row separating headers from data."
+  (let ((row-num (map-elt row :num)))
+    (cond
+     ((and separator-row-num (< row-num separator-row-num))
+      'md-render-table-header)
+     ((and md-render-table-zebra-stripe
+           (not (map-elt row :separator))
+           (= (mod data-row-num 2) 1))
+      'md-render-table-zebra))))
+
 (defun md-render--render-table-separator-row (col-widths)
   "Build the rendered separator line for COL-WIDTHS."
   (let ((pipe (if md-render-table-use-unicode-borders "┼" "|"))
@@ -2065,10 +2077,11 @@ logical rows (skipping the visual continuation lines)."
               lines)))
     (mapconcat #'identity (nreverse lines) "\n")))
 
-(cl-defun md-render--preprocess-table (&key rows window)
+(cl-defun md-render--preprocess-table (&key rows separator-row-num window)
   "Parse cells in ROWS and compute natural column widths.
 Returns an alist with `:natural-widths' and `:processed-rows'.
 
+SEPARATOR-ROW-NUM identifies the row separating headers from data.
 `:min-widths' (wrap-allocation widths from longest words) is no
 longer computed here — it's only needed when the table has to be
 allocated narrower than its natural total, and computing it for
@@ -2078,7 +2091,8 @@ need it should use `md-render--table-min-widths'.
 When WINDOW is given, cell widths are measured with
 pixel-accurate `md-render--table-display-width' so columns
 containing emoji/CJK line up with the column's right border."
-  (let ((widths nil)
+  (let ((data-row-num 0)
+        (widths nil)
         (processed-rows nil))
     (dolist (row rows)
       (if (map-elt row :separator)
@@ -2086,18 +2100,26 @@ containing emoji/CJK line up with the column's right border."
         (let ((cells (md-render--parse-table-row
                       (map-elt row :start) (map-elt row :end)))
               (col 0)
-              (processed-cells nil))
+              (processed-cells nil)
+              (row-face (md-render--table-row-face
+                         row separator-row-num data-row-num)))
           (dolist (cell cells)
-            (let* ((processed (md-render--table-apply-height-scaling
-                               (map-elt cell :content)))
-                   (dw (md-render--table-display-width
-                        :str processed :window window)))
-              (push processed processed-cells)
-              (if (nth col widths)
-                  (setf (nth col widths) (max (nth col widths) dw))
-                (setq widths (append widths (list dw))))
-              (setq col (1+ col))))
-          (push (cons row (nreverse processed-cells)) processed-rows))))
+            (let ((processed (md-render--table-apply-height-scaling
+                              (map-elt cell :content))))
+              (when row-face
+                (add-face-text-property
+                 0 (length processed) row-face t processed))
+              (let ((dw (md-render--table-display-width
+                         :str processed :window window)))
+                (push processed processed-cells)
+                (if (nth col widths)
+                    (setf (nth col widths) (max (nth col widths) dw))
+                  (setq widths (append widths (list dw))))
+                (setq col (1+ col)))))
+          (push (cons row (nreverse processed-cells)) processed-rows)
+          (unless (and separator-row-num
+                       (< (map-elt row :num) separator-row-num))
+            (setq data-row-num (1+ data-row-num))))))
     (list (cons :natural-widths widths)
           (cons :processed-rows (nreverse processed-rows)))))
 
@@ -2288,7 +2310,9 @@ prone to a few-pixel drift on emoji-heavy tables."
     (let* ((rows (md-render--collect-table-rows))
            (separator-row-num (md-render--find-separator-row-num rows))
            (preprocessed (md-render--preprocess-table
-                          :rows rows :window window))
+                          :rows rows
+                          :separator-row-num separator-row-num
+                          :window window))
            (natural-widths (map-elt preprocessed :natural-widths))
            (processed-rows (map-elt preprocessed :processed-rows))
            (target-width (when md-render-table-wrap-columns
@@ -2316,16 +2340,11 @@ prone to a few-pixel drift on emoji-heavy tables."
                (processed-cells (cdr entry))
                (row-num (map-elt row :num))
                (is-separator (map-elt row :separator))
-               (is-header (and separator-row-num
-                               (< row-num separator-row-num)))
-               (is-zebra (and md-render-table-zebra-stripe
-                              (not is-header)
-                              (not is-separator)
-                              (= (mod data-row-num 2) 1)))
-               (row-face (cond
-                          (is-header 'md-render-table-header)
-                          (is-zebra 'md-render-table-zebra))))
-          (unless (or is-header is-separator)
+               (row-face (md-render--table-row-face
+                          row separator-row-num data-row-num)))
+          (unless (or (and separator-row-num
+                           (< row-num separator-row-num))
+                      is-separator)
             (setq data-row-num (1+ data-row-num)))
           (push (if is-separator
                     (md-render--render-table-separator-row col-widths)
