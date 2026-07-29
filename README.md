@@ -36,7 +36,7 @@ It provides two views of the same buffer:
   columns with familiar keys.
 - **No required preview toolchain.** The core in-buffer renderer needs no
   Pandoc, browser, or external Markdown processor. Optional local tools add
-  SVG previews for LaTeX math and PNG previews for Mermaid diagrams.
+  previews for LaTeX math, Mermaid, PlantUML, and Graphviz diagrams.
 - **Small and self-contained.** `md-mode` depends only on Emacs 29.1 or newer.
 
 ## Compared with markdown-mode
@@ -74,10 +74,14 @@ Optional Rendered-view integrations:
   `latex` plus `dvisvgm`.
 - Fenced `mermaid` diagrams: Mermaid CLI (`mmdc`) and a local Chrome or
   Chromium installation.
+- Fenced `plantuml`/`puml` diagrams: the local PlantUML CLI.
+- Fenced `dot`/`graphviz` diagrams: the local Graphviz `dot` executable.
 
-Both integrations render asynchronously and cache generated images under
-`md-render-cache-directory`. Missing tools leave math literal and Mermaid as a
-normal source block. No document content is sent to a remote service.
+All integrations render asynchronously and cache generated images under
+`md-render-cache-directory`. Missing tools leave math literal or diagrams as
+normal source blocks. No document content is sent to a remote service.
+PlantUML runs with its `SANDBOX` security profile, and Graphviz runs in its
+restricted server mode to limit external resource loading.
 
 ## Installation
 
@@ -179,6 +183,57 @@ styled as you type.
 
 ## Customization
 
+Use `M-x customize-group RET md RET` for editing behavior and
+`M-x customize-group RET md-render RET` for renderer faces and options.
+`setopt` is recommended in Emacs configuration because it runs each option's
+Custom setter.
+
+### Option reference
+
+Editing and structure:
+
+| Option | Default | Purpose |
+|--------|---------|---------|
+| `md-mode-auto-align-tables` | `t` | Align Markdown tables when entering `md-mode` |
+| `md-mode-fold-front-matter-on-open` | `nil` | Start with front matter folded |
+| `md-mode-use-markdown-mode-faces` | `t` | Reuse compatible faces when `markdown-mode` faces are already loaded |
+| `md-mode-toc-side` | `left` | Open the TOC on the left or right |
+| `md-mode-toc-width` | `30` | Set the TOC width in columns |
+| `md-mode-heading-scaling-values` | `(2.0 1.7 1.4 1.1 1.0 1.0)` | Set relative sizes for heading levels one through six |
+
+Rendered images and tables:
+
+| Option | Default | Purpose |
+|--------|---------|---------|
+| `md-render-image-max-width` | `0.4` | Limit inline images by a window-width ratio or pixel count |
+| `md-render-prettify-tables` | `t` | Render tables with aligned columns |
+| `md-render-table-use-unicode-borders` | `t` | Use Unicode rather than ASCII table borders |
+| `md-render-table-wrap-columns` | `t` | Wrap table cells to fit the window |
+| `md-render-table-max-width-fraction` | `0.9` | Limit wrapped tables to a fraction of the window width |
+| `md-render-table-zebra-stripe` | `t` | Alternate table row backgrounds |
+
+Local media rendering:
+
+| Option | Default | Purpose |
+|--------|---------|---------|
+| `md-render-math-enabled` | `t` | Render supported LaTeX math when local tools are available |
+| `md-render-math-scale` | `1.0` | Scale generated math previews |
+| `md-render-mermaid-enabled` | `t` | Render Mermaid fenced blocks |
+| `md-render-mermaid-command` | `"mmdc"` | Select the Mermaid CLI executable |
+| `md-render-mermaid-browser` | `nil` | Select a browser executable, or auto-detect one |
+| `md-render-plantuml-enabled` | `t` | Render PlantUML fenced blocks |
+| `md-render-plantuml-command` | `"plantuml"` | Select the PlantUML executable |
+| `md-render-graphviz-enabled` | `t` | Render Graphviz fenced blocks |
+| `md-render-graphviz-command` | `"dot"` | Select the Graphviz executable |
+| `md-render-cache-directory` | `(locate-user-emacs-file "md-render/")` | Store generated preview files |
+
+Advanced renderer integration:
+
+| Option | Default | Purpose |
+|--------|---------|---------|
+| `md-render-language-mapping` | Common language aliases | Map fenced-block language names to Emacs major modes |
+| `md-render-render-functions` | `(md-render--render-media)` | Register renderers that claim and freeze regions before styling |
+
 Tables align automatically when `md-mode` starts. Disable that behavior
 without changing table rendering:
 
@@ -205,12 +260,44 @@ delimiter. To start with front matter folded:
 ```
 
 When `markdown-mode` faces are already defined, `md-mode` reuses compatible
-heading, emphasis, link, quote, table, and code faces buffer-locally. It does
-not load or depend on `markdown-mode`. Disable compatibility with:
+emphasis, link, quote, table, and code faces buffer-locally. It does not load
+or depend on `markdown-mode`. Disable compatibility with:
 
 ```elisp
 (setq md-mode-use-markdown-mode-faces nil)
 ```
+
+### Heading sizes
+
+Customize `md-mode-heading-scaling-values` to set the relative size of heading
+levels one through six:
+
+```elisp
+(setopt md-mode-heading-scaling-values
+        '(1.8 1.6 1.4 1.2 1.0 1.0))
+```
+
+Like Org, each level also has its own face. Use `M-x customize-face` with
+`md-render-header-1` through `md-render-header-6` to override an individual
+level. A saved face customization takes precedence over the scaling values,
+which remain independent of `markdown-mode` face compatibility.
+
+### CJK font sizing
+
+Heading faces use relative heights. If a CJK fallback font is configured with
+an absolute `:size`, Emacs keeps that size instead of scaling it with the
+heading, so Latin and CJK text can appear at different sizes. Configure the
+fallback family without `:size`:
+
+```elisp
+(dolist (script '(kana han cjk-misc bopomofo))
+  (set-fontset-font
+   t script (font-spec :family "Noto Sans CJK SC")))
+```
+
+The fallback font will still inherit the default body size, while headings
+scale normally. The same rule applies to Org and `markdown-mode` heading
+faces.
 
 Here is a ready-to-copy configuration with the main commands grouped under
 `C-c m`; replace the keys to match your setup:
@@ -231,9 +318,6 @@ Here is a ready-to-copy configuration with the main commands grouped under
   (md-mode-toc-width 30))
 ```
 
-Use `M-x customize-group RET md RET` for editing behavior and
-`M-x customize-group RET md-render RET` for renderer faces and options.
-
 ## Current scope
 
 `md-mode` is an early-stage, focused package rather than a drop-in replacement
@@ -246,10 +330,12 @@ coverage of `markdown-mode` are outside its present scope.
 Fenced code receives a block face in Edit view. Language-specific syntax
 highlighting remains a Rendered-view feature.
 
-Rendered view also recognizes local LaTeX math and fenced Mermaid diagrams
-when their optional executables are installed. Customize
+Rendered view also recognizes local LaTeX math and fenced Mermaid, PlantUML,
+and Graphviz diagrams when their optional executables are installed. Customize
 `md-render-math-enabled`, `md-render-mermaid-enabled`,
-`md-render-mermaid-browser`, and `md-render-cache-directory` to control these
+`md-render-mermaid-browser`, `md-render-plantuml-enabled`,
+`md-render-plantuml-command`, `md-render-graphviz-enabled`,
+`md-render-graphviz-command`, and `md-render-cache-directory` to control these
 integrations.
 
 The TOC, Imenu, and structural commands index ATX headings (`#` through

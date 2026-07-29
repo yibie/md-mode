@@ -34,6 +34,7 @@
 
 (require 'md-render)
 (require 'browse-url)
+(require 'cl-lib)
 (require 'face-remap)
 (require 'fringe)
 (require 'imenu)
@@ -203,12 +204,6 @@ not load or require `markdown-mode'."
     (md-render-inline-code . markdown-inline-code-face)
     (md-render-link . markdown-link-face)
     (md-render-blockquote . markdown-blockquote-face)
-    (md-render-header-1 . markdown-header-face-1)
-    (md-render-header-2 . markdown-header-face-2)
-    (md-render-header-3 . markdown-header-face-3)
-    (md-render-header-4 . markdown-header-face-4)
-    (md-render-header-5 . markdown-header-face-5)
-    (md-render-header-6 . markdown-header-face-6)
     (md-render-table-header . markdown-table-face)
     (md-render-table-border . markdown-table-face)
     (md-render-table-zebra . markdown-table-face)
@@ -224,6 +219,35 @@ not load or require `markdown-mode'."
     md-render-header-5
     md-render-header-6)
   "Faces used for rendered Markdown headings.")
+
+(defun md-mode--set-heading-scaling-values (symbol values)
+  "Set SYMBOL to heading scaling VALUES and update heading faces."
+  (unless
+      (and (proper-list-p values)
+           (= (length values) (length md-mode--heading-faces))
+           (seq-every-p
+            (lambda (value)
+              (and (floatp value) (> value 0)))
+            values))
+    (error "Heading scaling values must be six positive floats"))
+  (set-default symbol values)
+  (cl-mapc
+   (lambda (face height)
+     (unless (get face 'saved-face)
+       (set-face-attribute face nil :height height)))
+   md-mode--heading-faces values))
+
+(defcustom md-mode-heading-scaling-values
+  '(2.0 1.7 1.4 1.1 1.0 1.0)
+  "Relative face heights for heading levels one through six."
+  :type '(list (float :tag "Level 1")
+               (float :tag "Level 2")
+               (float :tag "Level 3")
+               (float :tag "Level 4")
+               (float :tag "Level 5")
+               (float :tag "Level 6"))
+  :set #'md-mode--set-heading-scaling-values
+  :group 'md)
 
 (defun md-mode--scale-heading-fallback-font ()
   "Let fallback fonts follow Markdown heading face heights."
@@ -2129,7 +2153,10 @@ When the region is active, use its lines as the callout body."
           (buffer-file-truename nil))
       (save-restriction
         (widen)
-        (md-render-replace-markup :force t))
+        (when font-lock-mode
+          (font-lock-ensure))
+        (with-silent-modifications
+          (md-render-replace-markup :force t)))
       (setq md-mode--source-point source-point)
       (md-mode--set-rendered-p t)
       (md-mode--scale-heading-fallback-font)
@@ -2153,10 +2180,12 @@ When the region is active, use its lines as the callout body."
           (buffer-file-truename nil))
       (save-restriction
         (widen)
-        (let ((source (md-render-reconstruct (point-min) (point-max))))
-          (erase-buffer)
-          (insert source)))
+        (with-silent-modifications
+          (let ((source (md-render-reconstruct (point-min) (point-max))))
+            (erase-buffer)
+            (insert source))))
       (md-mode--set-rendered-p nil)
+      (font-lock-flush)
       (goto-char (min (or source-point (point-min)) (point-max)))
       (setq md-mode--source-point nil)
       (set-buffer-modified-p modified)

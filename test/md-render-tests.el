@@ -2031,6 +2031,9 @@ for a fully-selected buffer."
 
 ;;; Optional Math and Mermaid rendering.
 
+(ert-deftest md-render-math-default-scale-matches-org-preview ()
+  (should (= md-render-math-scale 1.0)))
+
 (ert-deftest md-render-cached-inline-math-displays-svg-and-reconstructs ()
   (with-temp-buffer
     (let ((md-render-math-enabled t)
@@ -2115,11 +2118,123 @@ for a fully-selected buffer."
               (insert "```mermaid\ngraph TD\n  A --> B\n```\n")
               (md-render-replace-markup :force t :render-images nil)
               (should process-arguments)
-              (should (equal (car (plist-get process-arguments :command))
-                             "/fake/mmdc"))
+              (let ((command (plist-get process-arguments :command)))
+                (should (equal (car command) "/fake/mmdc"))
+                (should (equal (cadr (member "--scale" command)) "1")))
               (should (equal process-browser "/fake/chrome"))
               (should (functionp
                        (plist-get process-arguments :sentinel))))))
+      (delete-directory cache-directory t))))
+
+(ert-deftest md-render-fenced-diagram-backends-use-svg-caches ()
+  (let ((md-render-cache-directory temporary-file-directory))
+    (should
+     (eq (md-render--fenced-media-backend
+          "plantuml" '(plantuml graphviz))
+         'plantuml))
+    (should
+     (eq (md-render--fenced-media-backend
+          "puml" '(plantuml graphviz))
+         'plantuml))
+    (should
+     (eq (md-render--fenced-media-backend
+          "dot" '(plantuml graphviz))
+         'graphviz))
+    (should
+     (eq (md-render--fenced-media-backend
+          "graphviz" '(plantuml graphviz))
+         'graphviz))
+    (should
+     (string-suffix-p
+      ".svg"
+      (md-render--media-cache-file 'plantuml "@startuml\n@enduml")))
+    (should
+     (string-suffix-p
+      ".svg"
+      (md-render--media-cache-file 'graphviz "digraph { a -> b }")))))
+
+(ert-deftest md-render-cached-local-diagrams-display-and-reconstruct ()
+  (dolist (case '(("plantuml" plantuml "plantuml"
+                   "@startuml\nAlice -> Bob\n@enduml")
+                  ("dot" graphviz "dot"
+                   "digraph { a -> b }")))
+    (pcase-let ((`(,language ,backend ,command ,body) case))
+      (with-temp-buffer
+        (let ((md-render-math-enabled nil)
+              (md-render-mermaid-enabled nil)
+              (md-render-plantuml-enabled (eq backend 'plantuml))
+              (md-render-graphviz-enabled (eq backend 'graphviz))
+              (md-render-render-functions '(md-render--render-media)))
+          (cl-letf (((symbol-function 'executable-find)
+                     (lambda (candidate)
+                       (and (equal candidate command)
+                            (concat "/fake/" candidate))))
+                    ((symbol-function 'display-graphic-p)
+                     (lambda (&rest _) t))
+                    ((symbol-function 'file-exists-p)
+                     (lambda (_file) t))
+                    ((symbol-function 'create-image)
+                     (lambda (&rest _) '(image :type svg :fake t))))
+            (insert (format "```%s\n%s\n```\n" language body))
+            (let ((source (buffer-string)))
+              (md-render-replace-markup :force t :render-images nil)
+              (should
+               (equal (md-render-reconstruct (point-min) (point-max))
+                      source))
+              (goto-char (point-min))
+              (search-forward " ")
+              (should
+               (equal (get-text-property (1- (point)) 'display)
+                      '(image :type svg :fake t)))
+              (should
+               (string-suffix-p
+                ".svg"
+                (get-text-property
+                 (1- (point)) 'md-render-media-file))))))))))
+
+(ert-deftest md-render-local-diagram-processes-use-official-cli-shapes ()
+  (let ((cache-directory (make-temp-file "md-render-diagrams-" t)))
+    (unwind-protect
+        (dolist (case '((plantuml "plantuml" ".svg")
+                        (graphviz "dot" ".svg")))
+          (pcase-let ((`(,backend ,executable ,extension) case))
+            (let* ((md-render-cache-directory cache-directory)
+                   (md-render-plantuml-command "plantuml")
+                   (md-render-graphviz-command "dot")
+                   (file (expand-file-name
+                          (concat (symbol-name backend) extension)
+                          cache-directory))
+                   process-arguments
+                   plantuml-security-profile
+                   graphviz-server-name)
+              (cl-letf (((symbol-function 'executable-find)
+                         (lambda (candidate)
+                           (and (equal candidate executable)
+                                (concat "/fake/" candidate))))
+                        ((symbol-function 'make-process)
+                         (lambda (&rest arguments)
+                           (setq process-arguments arguments)
+                           (setq plantuml-security-profile
+                                 (getenv "PLANTUML_SECURITY_PROFILE"))
+                           (setq graphviz-server-name
+                                 (getenv "SERVER_NAME"))
+                           'fake-process)))
+                (md-render--start-media-process backend "source" file)
+                (let ((command (plist-get process-arguments :command)))
+                  (should (equal (car command)
+                                 (concat "/fake/" executable)))
+                  (pcase backend
+                    ('plantuml
+                     (should (equal (cadr command) "-tsvg"))
+                     (should
+                      (equal plantuml-security-profile "SANDBOX")))
+                    ('graphviz
+                     (should (equal
+                              (list (cadr command)
+                                    (nth 3 command))
+                              (list "-Tsvg" "-o")))
+                     (should
+                      (equal graphviz-server-name "md-render")))))))))
       (delete-directory cache-directory t))))
 
 (ert-deftest md-render-math-without-tools-preserves-literal-source ()

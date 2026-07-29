@@ -46,6 +46,8 @@
 ;;   fenced code ```LANG\nX\n```          body syntax-highlighted via LANG mode
 ;;   LaTeX math `\(X\)', `\[X\]', `$$X$$' optional local SVG preview
 ;;   Mermaid     ```mermaid\nX\n```       optional local image preview
+;;   PlantUML    ```plantuml\nX\n```      optional local SVG preview
+;;   Graphviz    ```dot\nX\n```           optional local SVG preview
 ;;   tables      `| A | B |' grid rows    rendered with aligned columns,
 ;;                                         unicode borders, header/zebra rows
 ;;                                         and wrap-to-window-width support
@@ -122,17 +124,17 @@
   "Display title and accent face for each supported callout type.")
 
 (defface md-render-header-1
-  '((t :inherit org-level-1 :height 1.5))
+  '((t :inherit org-level-1 :height 2.0))
   "Face for level-1 headers rendered by `md-render-convert'."
   :group 'md-render)
 
 (defface md-render-header-2
-  '((t :inherit org-level-2 :height 1.35))
+  '((t :inherit org-level-2 :height 1.7))
   "Face for level-2 headers rendered by `md-render-convert'."
   :group 'md-render)
 
 (defface md-render-header-3
-  '((t :inherit org-level-3 :height 1.2))
+  '((t :inherit org-level-3 :height 1.4))
   "Face for level-3 headers rendered by `md-render-convert'."
   :group 'md-render)
 
@@ -142,12 +144,12 @@
   :group 'md-render)
 
 (defface md-render-header-5
-  '((t :inherit org-level-5 :height 1.05))
+  '((t :inherit org-level-5 :height 1.0))
   "Face for level-5 headers rendered by `md-render-convert'."
   :group 'md-render)
 
 (defface md-render-header-6
-  '((t :inherit org-level-6))
+  '((t :inherit org-level-6 :height 1.0))
   "Face for level-6 headers rendered by `md-render-convert'."
   :group 'md-render)
 
@@ -244,13 +246,41 @@ Nil means detect Chrome or Chromium automatically.  Set this when
                  (file :must-match t))
   :group 'md-render)
 
+(defcustom md-render-plantuml-enabled t
+  "When non-nil, render complete PlantUML fenced blocks as SVG.
+
+Rendering requires `md-render-plantuml-command'.  When it is
+unavailable, `plantuml' and `puml' fences retain the normal
+source-block rendering."
+  :type 'boolean
+  :group 'md-render)
+
+(defcustom md-render-plantuml-command "plantuml"
+  "Executable used to render PlantUML fenced blocks."
+  :type 'string
+  :group 'md-render)
+
+(defcustom md-render-graphviz-enabled t
+  "When non-nil, render complete Graphviz fenced blocks as SVG.
+
+Rendering requires `md-render-graphviz-command'.  When it is
+unavailable, `dot' and `graphviz' fences retain the normal
+source-block rendering."
+  :type 'boolean
+  :group 'md-render)
+
+(defcustom md-render-graphviz-command "dot"
+  "Executable used to render Graphviz fenced blocks."
+  :type 'string
+  :group 'md-render)
+
 (defcustom md-render-cache-directory
   (locate-user-emacs-file "md-render/")
-  "Directory where generated Math and Mermaid images are cached."
+  "Directory where generated preview images are cached."
   :type 'directory
   :group 'md-render)
 
-(defcustom md-render-math-scale 1.5
+(defcustom md-render-math-scale 1.0
   "Scale applied to generated LaTeX math previews."
   :type 'float
   :group 'md-render)
@@ -325,7 +355,7 @@ at position 1200 returns:
 (defvar md-render--media-jobs (make-hash-table :test #'equal)
   "Active media render jobs keyed by their output file.")
 
-(defconst md-render--media-cache-version 2
+(defconst md-render--media-cache-version 3
   "Version of the generated media cache format.")
 
 (cl-defun md-render-convert (markdown)
@@ -577,14 +607,17 @@ this returns `(((:watermark . 1200)))'."
                         (list md-render--media-cache-version
                               backend appearance source)))))
     (expand-file-name
-     (concat digest (if (eq backend 'math) ".svg" ".png"))
+     (concat digest
+             (pcase backend
+               ('mermaid ".png")
+               ((or 'math 'plantuml 'graphviz) ".svg")))
      md-render-cache-directory)))
 
 (defun md-render--media-image (file backend)
   "Create a displayed image from FILE rendered by BACKEND."
   (create-image file nil nil
                 :max-width
-                (if (eq backend 'mermaid)
+                (if (memq backend '(mermaid plantuml graphviz))
                     (if-let* ((window
                                (get-buffer-window
                                 (current-buffer) t)))
@@ -647,7 +680,11 @@ this returns `(((:watermark . 1200)))'."
   (let* ((input
           (expand-file-name
            (concat (file-name-base file)
-                   (if (eq backend 'math) ".formula" ".mmd"))
+                   (pcase backend
+                     ('math ".formula")
+                     ('mermaid ".mmd")
+                     ('plantuml ".puml")
+                     ('graphviz ".dot")))
            md-render-cache-directory))
          (log-buffer
           (generate-new-buffer
@@ -685,15 +722,30 @@ this returns `(((:watermark . 1200)))'."
                        "dark"
                      "default")
                    "--backgroundColor" "transparent"
-                   "--scale" "2")))))
+                   "--scale" "1"))
+            ('plantuml
+             (list (executable-find md-render-plantuml-command)
+                   "-tsvg" input))
+            ('graphviz
+             (list (executable-find md-render-graphviz-command)
+                   "-Tsvg" input "-o" file)))))
     (write-region source nil input nil 'silent)
     (condition-case err
         (let ((process-environment
-               (if-let* (((eq backend 'mermaid))
-                         (browser (md-render--mermaid-browser)))
-                   (cons (concat "PUPPETEER_EXECUTABLE_PATH=" browser)
-                         process-environment)
-                 process-environment)))
+               (pcase backend
+                 ('mermaid
+                  (if-let* ((browser (md-render--mermaid-browser)))
+                      (cons
+                       (concat "PUPPETEER_EXECUTABLE_PATH=" browser)
+                       process-environment)
+                    process-environment))
+                 ('plantuml
+                  (cons "PLANTUML_SECURITY_PROFILE=SANDBOX"
+                        process-environment))
+                 ('graphviz
+                  (cons "SERVER_NAME=md-render"
+                        process-environment))
+                 (_ process-environment))))
           (make-process
            :name (format "md-render-%s-%s"
                          backend (substring (file-name-base file) 0 8))
@@ -769,6 +821,14 @@ rendering errors."
   "Return non-nil when the configured Mermaid command is available."
   (executable-find md-render-mermaid-command))
 
+(defun md-render--plantuml-tool-available-p ()
+  "Return non-nil when the configured PlantUML command is available."
+  (executable-find md-render-plantuml-command))
+
+(defun md-render--graphviz-tool-available-p ()
+  "Return non-nil when the configured Graphviz command is available."
+  (executable-find md-render-graphviz-command))
+
 (defun md-render--mermaid-browser ()
   "Return the browser executable Mermaid CLI should use, or nil."
   (or md-render-mermaid-browser
@@ -781,22 +841,36 @@ rendering errors."
       (executable-find "chromium")
       (executable-find "chromium-browser")))
 
-(defun md-render--render-fenced-media (context math-available mermaid-available)
-  "Render complete fenced media from CONTEXT when tools are available.
+(defun md-render--fenced-media-backend (language available-backends)
+  "Return the backend for LANGUAGE when present in AVAILABLE-BACKENDS."
+  (cond
+   ((and (memq 'math available-backends)
+         (member language '("math" "latex")))
+    'math)
+   ((and (memq 'mermaid available-backends)
+         (equal language "mermaid"))
+    'mermaid)
+   ((and (memq 'plantuml available-backends)
+         (member language '("plantuml" "puml")))
+    'plantuml)
+   ((and (memq 'graphviz available-backends)
+         (member language '("dot" "graphviz")))
+    'graphviz)))
 
-MATH-AVAILABLE and MERMAID-AVAILABLE report the local toolchains."
+(defun md-render--render-fenced-media (context available-backends)
+  "Render complete fenced media from CONTEXT using AVAILABLE-BACKENDS."
   (dolist (block (reverse (map-elt context :source-blocks)))
-    (let ((language (map-elt block :language)))
-      (when (and (map-elt block :complete)
-                 (or (and math-available
-                          (member language '("math" "latex")))
-                     (and mermaid-available
-                          (equal language "mermaid"))))
+    (let* ((language (map-elt block :language))
+           (backend
+            (and (map-elt block :complete)
+                 (md-render--fenced-media-backend
+                  language available-backends))))
+      (when backend
         (let* ((start (map-nested-elt block '(:block :start)))
                (end (map-nested-elt block '(:block :end)))
                (body (map-elt block :body))
                (source (buffer-substring-no-properties start end))
-               (math-p (member language '("math" "latex"))))
+               (math-p (eq backend 'math)))
           (md-render--insert-media
            :start start
            :end end
@@ -804,9 +878,14 @@ MATH-AVAILABLE and MERMAID-AVAILABLE report the local toolchains."
            :render-source (if math-p
                               (format "\\[\n%s\n\\]" body)
                             body)
-           :backend (if math-p 'math 'mermaid)
+           :backend backend
            :block-p t
-           :label (if math-p "Math" "Mermaid")))))))
+           :label
+           (pcase backend
+             ('math "Math")
+             ('mermaid "Mermaid")
+             ('plantuml "PlantUML")
+             ('graphviz "Graphviz"))))))))
 
 (defun md-render--render-inline-math (context available)
   "Render inline and block math from CONTEXT when AVAILABLE.
@@ -857,15 +936,26 @@ Return the earliest incomplete math delimiter, or nil."
     (let ((math-available
            (and md-render-math-enabled
                 (md-render--math-tools-available-p)))
-          (mermaid-available
-           (and md-render-mermaid-enabled
-                (md-render--mermaid-tool-available-p)))
+          available-backends
           watermark)
+      (setq available-backends
+            (delq
+             nil
+             (list
+              (and math-available 'math)
+              (and md-render-mermaid-enabled
+                   (md-render--mermaid-tool-available-p)
+                   'mermaid)
+              (and md-render-plantuml-enabled
+                   (md-render--plantuml-tool-available-p)
+                   'plantuml)
+              (and md-render-graphviz-enabled
+                   (md-render--graphviz-tool-available-p)
+                   'graphviz))))
       (when md-render-math-enabled
         (setq watermark
               (md-render--render-inline-math context math-available)))
-      (md-render--render-fenced-media
-       context math-available mermaid-available)
+      (md-render--render-fenced-media context available-backends)
       (and watermark (list (cons :watermark watermark))))))
 
 (cl-defun md-render--replace-bolds (&key avoid-ranges)

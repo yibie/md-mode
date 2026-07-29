@@ -27,9 +27,15 @@
 
 (defun md-mode-tests--has-face-p (text face)
   "Return non-nil when TEXT has FACE in the current buffer."
-  (let ((value (md-mode-tests--face-at text)))
-    (or (eq value face)
-        (and (listp value) (memq face value)))))
+  (goto-char (point-min))
+  (search-forward text)
+  (let ((position (- (point) (length text))))
+    (cl-some
+     (lambda (value)
+       (or (eq value face)
+           (and (listp value) (memq face value))))
+     (list (get-text-property position 'face)
+           (get-text-property position 'font-lock-face)))))
 
 (defun md-mode-tests--imenu-shape (index)
   "Return INDEX titles and hierarchy without target markers."
@@ -61,11 +67,66 @@
     (should (eq (md-mode-tests--face-at "Added while editing")
                 'md-render-header-2))))
 
-(ert-deftest md-mode-heading-faces-have-distinct-sizes ()
-  (should (> (face-attribute 'md-render-header-1 :height nil nil)
-             (face-attribute 'md-render-header-2 :height nil nil)))
-  (should (> (face-attribute 'md-render-header-2 :height nil nil)
-             (face-attribute 'md-render-header-3 :height nil nil))))
+(ert-deftest md-mode-heading-faces-match-markdown-mode-scale ()
+  (should
+   (equal
+    (mapcar
+     (lambda (face)
+       (face-attribute face :height nil nil))
+     md-mode--heading-faces)
+    '(2.0 1.7 1.4 1.1 1.0 1.0))))
+
+(ert-deftest md-mode-heading-scale-is-customizable ()
+  (let ((original-values
+         (default-value 'md-mode-heading-scaling-values))
+        (original-heights
+         (mapcar
+          (lambda (face)
+            (face-attribute face :height nil nil))
+          md-mode--heading-faces))
+        (values '(1.8 1.6 1.4 1.2 1.0 0.9)))
+    (unwind-protect
+        (progn
+          (customize-set-variable
+           'md-mode-heading-scaling-values values)
+          (should
+           (equal
+            (default-value 'md-mode-heading-scaling-values)
+            values))
+          (should
+           (equal
+            (mapcar
+             (lambda (face)
+               (face-attribute face :height nil nil))
+             md-mode--heading-faces)
+            values)))
+      (set-default
+       'md-mode-heading-scaling-values original-values)
+      (cl-mapc
+       (lambda (face height)
+         (set-face-attribute face nil :height height))
+       md-mode--heading-faces original-heights))))
+
+(ert-deftest md-mode-custom-heading-face-wins-over-scaling-values ()
+  (let ((original-values
+         (default-value 'md-mode-heading-scaling-values))
+        (saved-face
+         (get 'md-render-header-1 'saved-face))
+        updated-faces)
+    (unwind-protect
+        (progn
+          (put 'md-render-header-1 'saved-face t)
+          (cl-letf (((symbol-function 'set-face-attribute)
+                     (lambda (face &rest _)
+                       (push face updated-faces))))
+            (md-mode--set-heading-scaling-values
+             'md-mode-heading-scaling-values
+             '(1.8 1.6 1.4 1.2 1.0 1.0))))
+      (set-default
+       'md-mode-heading-scaling-values original-values)
+      (put 'md-render-header-1 'saved-face saved-face))
+    (should-not (memq 'md-render-header-1 updated-faces))
+    (should (= (length updated-faces) 5))))
 
 (ert-deftest md-mode-render-scales-heading-fallback-fonts ()
   (with-temp-buffer
@@ -123,7 +184,9 @@
         remappings)
     (cl-letf (((symbol-function 'facep)
                (lambda (face &optional _frame)
-                 (eq face 'markdown-bold-face)))
+                 (memq face
+                       '(markdown-bold-face
+                         markdown-header-face-1))))
               ((symbol-function 'face-remap-add-relative)
                (lambda (&rest remapping)
                  (push remapping remappings))))
@@ -1081,6 +1144,33 @@
     (should-not (buffer-modified-p))
     (should (equal (buffer-string) md-mode-tests--source))))
 
+(ert-deftest md-mode-first-render-survives-initial-fontification ()
+  (with-temp-buffer
+    (insert "# Title\n\nBody\n")
+    (md-mode)
+    (md-mode-render)
+    (font-lock-ensure)
+    (should (md-mode-tests--has-face-p "Title"
+                                      'md-render-header-1))
+    (md-mode-show-source)
+    (font-lock-ensure)
+    (should (md-mode-tests--has-face-p "Title"
+                                      'md-render-header-1))))
+
+(ert-deftest md-mode-render-transitions-do-not-run-edit-hooks ()
+  (with-temp-buffer
+    (insert "# Title\n")
+    (md-mode)
+    (let ((changes 0))
+      (add-hook 'after-change-functions
+                (lambda (&rest _)
+                  (setq changes (1+ changes)))
+                nil t)
+      (md-mode-render)
+      (should (= changes 0))
+      (md-mode-show-source)
+      (should (= changes 0)))))
+
 (ert-deftest md-mode-mermaid-renders-image-and-restores-code ()
   (with-temp-buffer
     (let ((source "```mermaid\ngraph TD\n  A --> B\n```\n")
@@ -1103,6 +1193,53 @@
                        '(image :type png :fake t)))
         (md-mode-show-source)
         (should (equal (buffer-string) source))))))
+
+(ert-deftest md-mode-first-render-applies-async-media-callback ()
+  (let ((cache-directory (make-temp-file "md-mode-media-" t))
+        sentinel)
+    (unwind-protect
+        (with-temp-buffer
+          (let ((source "```mermaid\ngraph TD\n  A --> B\n```\n")
+                (md-render-cache-directory cache-directory)
+                (md-render-math-enabled nil)
+                (md-render-mermaid-enabled t))
+            (cl-letf (((symbol-function 'display-graphic-p)
+                       (lambda (&rest _) t))
+                      ((symbol-function 'executable-find)
+                       (lambda (command)
+                         (and (equal command "mmdc") "/fake/mmdc")))
+                      ((symbol-function 'make-process)
+                       (lambda (&rest arguments)
+                         (setq sentinel (plist-get arguments :sentinel))
+                         'fake-process))
+                      ((symbol-function 'process-status)
+                       (lambda (_process) 'exit))
+                      ((symbol-function 'process-exit-status)
+                       (lambda (_process) 0))
+                      ((symbol-function 'create-image)
+                       (lambda (&rest _) '(image :type png :fake t))))
+              (insert source)
+              (md-mode)
+              (md-mode-render)
+              (should sentinel)
+              (let* ((position
+                      (text-property-not-all
+                       (point-min) (point-max)
+                       'md-render-media-file nil))
+                     (file
+                      (and position
+                           (get-text-property
+                            position 'md-render-media-file))))
+                (should position)
+                (should-not (get-text-property position 'display))
+                (write-region "" nil file nil 'silent)
+                (funcall sentinel 'fake-process "finished\n")
+                (should (equal (get-text-property position 'display)
+                               '(image :type png :fake t))))
+              (md-mode-show-source)
+              (should (equal (buffer-string) source)))))
+      (clrhash md-render--media-jobs)
+      (delete-directory cache-directory t))))
 
 (ert-deftest md-mode-render-preserves-callout-display-properties ()
   (with-temp-buffer
