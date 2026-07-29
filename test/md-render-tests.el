@@ -2029,6 +2029,113 @@ for a fully-selected buffer."
     (search-forward "⧉")
     (should-not (md-render-source-block-at-point (1- (point))))))
 
+;;; Optional Math and Mermaid rendering.
+
+(ert-deftest md-render-cached-inline-math-displays-svg-and-reconstructs ()
+  (with-temp-buffer
+    (let ((md-render-math-enabled t)
+          (md-render-mermaid-enabled nil)
+          (md-render-render-functions '(md-render--render-media)))
+      (cl-letf (((symbol-function 'executable-find)
+                 (lambda (command)
+                   (and (member command '("latex" "dvisvgm" "emacs"))
+                        (concat "/fake/" command))))
+                ((symbol-function 'display-graphic-p) (lambda (&rest _) t))
+                ((symbol-function 'file-exists-p) (lambda (_file) t))
+                ((symbol-function 'create-image)
+                 (lambda (&rest _) '(image :type svg :fake t))))
+        (insert "before \\(a_b\\) and `\\(literal\\)` after")
+        (let ((source (buffer-string)))
+          (md-render-replace-markup :force t :render-images nil)
+          (should (equal (md-render-reconstruct (point-min) (point-max))
+                         source))
+          (goto-char (point-min))
+          (search-forward "before ")
+          (should (equal (get-text-property (point) 'display)
+                         '(image :type svg :fake t)))
+          (should (get-text-property (point) 'md-render-frozen))
+          (should (string-match-p
+                   (regexp-quote "\\(literal\\)")
+                   (buffer-substring-no-properties
+                    (point-min) (point-max)))))))))
+
+(ert-deftest md-render-cached-mermaid-displays-png-and-reconstructs ()
+  (with-temp-buffer
+    (let ((md-render-math-enabled nil)
+          (md-render-mermaid-enabled t)
+          (md-render-render-functions '(md-render--render-media)))
+      (cl-letf (((symbol-function 'executable-find)
+                 (lambda (command)
+                   (and (equal command "mmdc") "/fake/mmdc")))
+                ((symbol-function 'display-graphic-p) (lambda (&rest _) t))
+                ((symbol-function 'file-exists-p) (lambda (_file) t))
+                ((symbol-function 'create-image)
+                 (lambda (&rest _) '(image :type png :fake t))))
+        (insert "```mermaid\ngraph TD\n  A --> B\n```\n")
+        (let ((source (buffer-string)))
+          (md-render-replace-markup :force t :render-images nil)
+          (should (equal (md-render-reconstruct (point-min) (point-max))
+                         source))
+          (goto-char (point-min))
+          (search-forward " ")
+          (should (equal (get-text-property (1- (point)) 'display)
+                         '(image :type png :fake t)))
+          (should
+           (string-suffix-p
+            ".png"
+            (get-text-property (1- (point)) 'md-render-media-file)))
+          (should-not (string-match-p
+                       "mermaid ⧉"
+                       (buffer-substring-no-properties
+                        (point-min) (point-max)))))))))
+
+(ert-deftest md-render-mermaid-cache-miss-starts-async-process ()
+  (let ((cache-directory (make-temp-file "md-render-media-" t))
+        process-arguments
+        process-browser)
+    (unwind-protect
+        (with-temp-buffer
+          (let ((md-render-cache-directory cache-directory)
+                (md-render-math-enabled nil)
+                (md-render-mermaid-enabled t)
+                (md-render-render-functions '(md-render--render-media)))
+            (cl-letf (((symbol-function 'executable-find)
+                       (lambda (command)
+                         (and (equal command "mmdc") "/fake/mmdc")))
+                      ((symbol-function 'display-graphic-p)
+                       (lambda (&rest _) t))
+                      ((symbol-function 'md-render--mermaid-browser)
+                       (lambda () "/fake/chrome"))
+                      ((symbol-function 'make-process)
+                       (lambda (&rest arguments)
+                         (setq process-arguments arguments)
+                         (setq process-browser
+                               (getenv "PUPPETEER_EXECUTABLE_PATH"))
+                         'fake-process)))
+              (insert "```mermaid\ngraph TD\n  A --> B\n```\n")
+              (md-render-replace-markup :force t :render-images nil)
+              (should process-arguments)
+              (should (equal (car (plist-get process-arguments :command))
+                             "/fake/mmdc"))
+              (should (equal process-browser "/fake/chrome"))
+              (should (functionp
+                       (plist-get process-arguments :sentinel))))))
+      (delete-directory cache-directory t))))
+
+(ert-deftest md-render-math-without-tools-preserves-literal-source ()
+  (with-temp-buffer
+    (let ((md-render-math-enabled t)
+          (md-render-render-functions '(md-render--render-media)))
+      (cl-letf (((symbol-function 'display-graphic-p)
+                 (lambda (&rest _) t))
+                ((symbol-function 'executable-find)
+                 (lambda (_command) nil)))
+        (insert "before \\(a_b\\) after")
+        (md-render-replace-markup :force t :render-images nil)
+        (should (equal (buffer-string) "before \\(a_b\\) after"))
+        (search-backward "\\(a_b\\)")
+        (should (get-text-property (point) 'md-render-frozen))))))
+
 (provide 'md-render-tests)
 
 ;;; md-render-tests.el ends here

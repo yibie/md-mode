@@ -44,6 +44,8 @@
 ;;   image path  bare image path on a line  same as `![alt](url)' (no markup)
 ;;   divider     `---' / `***' / `___'    rendered as an underlined rule line
 ;;   fenced code ```LANG\nX\n```          body syntax-highlighted via LANG mode
+;;   LaTeX math `\(X\)', `\[X\]', `$$X$$' optional local SVG preview
+;;   Mermaid     ```mermaid\nX\n```       optional local image preview
 ;;   tables      `| A | B |' grid rows    rendered with aligned columns,
 ;;                                         unicode borders, header/zebra rows
 ;;                                         and wrap-to-window-width support
@@ -210,6 +212,49 @@ When nil, fall back to ASCII pipes and dashes."
   :type 'boolean
   :group 'md-render)
 
+(defcustom md-render-math-enabled t
+  "When non-nil, render LaTeX math as SVG when local tools are available.
+
+Rendering requires the `emacs', `latex', and `dvisvgm'
+executables.  Complete math remains literal when those tools are
+unavailable."
+  :type 'boolean
+  :group 'md-render)
+
+(defcustom md-render-mermaid-enabled t
+  "When non-nil, render complete Mermaid fenced blocks as PNG images.
+
+Rendering requires `md-render-mermaid-command'.  When it is
+unavailable, Mermaid fences retain the normal source-block
+rendering."
+  :type 'boolean
+  :group 'md-render)
+
+(defcustom md-render-mermaid-command "mmdc"
+  "Executable used to render Mermaid fenced blocks."
+  :type 'string
+  :group 'md-render)
+
+(defcustom md-render-mermaid-browser nil
+  "Browser executable used by Mermaid CLI.
+
+Nil means detect Chrome or Chromium automatically.  Set this when
+`mmdc' cannot find the browser installation to use."
+  :type '(choice (const :tag "Auto-detect" nil)
+                 (file :must-match t))
+  :group 'md-render)
+
+(defcustom md-render-cache-directory
+  (locate-user-emacs-file "md-render/")
+  "Directory where generated Math and Mermaid images are cached."
+  :type 'directory
+  :group 'md-render)
+
+(defcustom md-render-math-scale 1.5
+  "Scale applied to generated LaTeX math previews."
+  :type 'float
+  :group 'md-render)
+
 (defcustom md-render-language-mapping
   '(("elisp" . "emacs-lisp")
     ("objective-c" . "objc")
@@ -224,7 +269,7 @@ backticks; values are the corresponding Emacs mode prefix (the
   :type '(alist :key-type string :value-type string)
   :group 'md-render)
 
-(defcustom md-render-render-functions nil
+(defcustom md-render-render-functions '(md-render--render-media)
   "Abnormal hook of external renderers, run before the styling passes.
 
 Lets a third-party package (e.g. a LaTeX-math renderer) claim and
@@ -276,6 +321,12 @@ at position 1200 returns:
   ((:watermark . 1200))"
   :type 'hook
   :group 'md-render)
+
+(defvar md-render--media-jobs (make-hash-table :test #'equal)
+  "Active media render jobs keyed by their output file.")
+
+(defconst md-render--media-cache-version 2
+  "Version of the generated media cache format.")
 
 (cl-defun md-render-convert (markdown)
   "Convert MARKDOWN string into propertized text.
@@ -510,6 +561,312 @@ this returns `(((:watermark . 1200)))'."
                           (push result results))
                         nil))
     (nreverse results)))
+
+(defun md-render--media-cache-file (backend source)
+  "Return the cached image path for BACKEND rendering SOURCE."
+  (let* ((appearance
+          (pcase backend
+            ('math
+             (list md-render-math-scale
+                   (face-foreground 'default nil t)))
+            ('mermaid
+             (frame-parameter nil 'background-mode))))
+         (digest
+          (secure-hash 'sha256
+                       (prin1-to-string
+                        (list md-render--media-cache-version
+                              backend appearance source)))))
+    (expand-file-name
+     (concat digest (if (eq backend 'math) ".svg" ".png"))
+     md-render-cache-directory)))
+
+(defun md-render--media-image (file backend)
+  "Create a displayed image from FILE rendered by BACKEND."
+  (create-image file nil nil
+                :max-width
+                (if (eq backend 'mermaid)
+                    (if-let* ((window
+                               (get-buffer-window
+                                (current-buffer) t)))
+                        (floor (* 0.9 (window-body-width window t)))
+                      (md-render--image-max-width))
+                  (md-render--image-max-width))
+                :ascent 'center))
+
+(defun md-render--media-apply (watcher file error-message)
+  "Apply FILE or ERROR-MESSAGE to a live media WATCHER."
+  (pcase-let ((`(,buffer ,marker ,label ,backend) watcher))
+    (when (and (buffer-live-p buffer)
+               (marker-buffer marker))
+      (with-current-buffer buffer
+        (let ((position (marker-position marker)))
+          (when (equal (get-text-property position 'md-render-media-file)
+                       file)
+            (let ((inhibit-read-only t))
+              (with-silent-modifications
+                (condition-case err
+                    (put-text-property
+                     position (1+ position) 'display
+                     (if error-message
+                         (propertize
+                          (format "⚠ %s" label)
+                          'face 'error
+                          'help-echo error-message)
+                       (md-render--media-image file backend)))
+                  (error
+                   (put-text-property
+                    position (1+ position) 'display
+                    (propertize
+                     (format "⚠ %s" label)
+                     'face 'error
+                     'help-echo (error-message-string err)))))))
+            (force-window-update buffer)))))))
+
+(defun md-render--finish-media-job (file error-message)
+  "Finish the media job for FILE, showing ERROR-MESSAGE on failure."
+  (let ((watchers (gethash file md-render--media-jobs)))
+    (remhash file md-render--media-jobs)
+    (dolist (watcher watchers)
+      (md-render--media-apply watcher file error-message))))
+
+(defun md-render--media-process-error (process)
+  "Return a concise error message from failed PROCESS."
+  (let ((buffer (process-buffer process)))
+    (if (buffer-live-p buffer)
+        (with-current-buffer buffer
+          (string-trim
+           (buffer-substring-no-properties
+            (max (point-min) (- (point-max) 1000))
+            (point-max))))
+      (format "Renderer exited with status %s"
+              (process-exit-status process)))))
+
+(defun md-render--start-media-process (backend source file)
+  "Start an asynchronous BACKEND job rendering SOURCE to FILE."
+  (make-directory md-render-cache-directory t)
+  (let* ((input
+          (expand-file-name
+           (concat (file-name-base file)
+                   (if (eq backend 'math) ".formula" ".mmd"))
+           md-render-cache-directory))
+         (log-buffer
+          (generate-new-buffer
+           (format " *md-render-%s*" backend)))
+         (command
+          (pcase backend
+            ('math
+             (let ((emacs (executable-find "emacs"))
+                   (foreground (face-foreground 'default nil t)))
+               (list
+                emacs "-Q" "--batch" "--eval"
+                (prin1-to-string
+                 `(progn
+                    (require 'org)
+                    (let ((options
+                           (copy-sequence org-format-latex-options)))
+                      (setq options
+                            (plist-put options :foreground ,foreground))
+                      (setq options
+                            (plist-put options :background "Transparent"))
+                      (setq options
+                            (plist-put options :scale
+                                       ,md-render-math-scale))
+                      (org-create-formula-image
+                       (with-temp-buffer
+                         (insert-file-contents ,input)
+                         (buffer-string))
+                       ,file options t 'dvisvgm)))))))
+            ('mermaid
+             (list (executable-find md-render-mermaid-command)
+                   "--input" input
+                   "--output" file
+                   "--theme"
+                   (if (eq (frame-parameter nil 'background-mode) 'dark)
+                       "dark"
+                     "default")
+                   "--backgroundColor" "transparent"
+                   "--scale" "2")))))
+    (write-region source nil input nil 'silent)
+    (condition-case err
+        (let ((process-environment
+               (if-let* (((eq backend 'mermaid))
+                         (browser (md-render--mermaid-browser)))
+                   (cons (concat "PUPPETEER_EXECUTABLE_PATH=" browser)
+                         process-environment)
+                 process-environment)))
+          (make-process
+           :name (format "md-render-%s-%s"
+                         backend (substring (file-name-base file) 0 8))
+           :buffer log-buffer
+           :command command
+           :connection-type 'pipe
+           :noquery t
+           :sentinel
+           (lambda (process _event)
+             (when (memq (process-status process) '(exit signal))
+               (let ((error-message
+                      (unless (and (zerop (process-exit-status process))
+                                   (file-exists-p file))
+                        (md-render--media-process-error process))))
+                 (when (file-exists-p input)
+                   (delete-file input))
+                 (when (buffer-live-p log-buffer)
+                   (kill-buffer log-buffer))
+                 (md-render--finish-media-job file error-message))))))
+      (error
+       (when (file-exists-p input)
+         (delete-file input))
+       (when (buffer-live-p log-buffer)
+         (kill-buffer log-buffer))
+       (md-render--finish-media-job file (error-message-string err))))))
+
+(defun md-render--watch-media (backend source file marker label)
+  "Display BACKEND output for SOURCE at MARKER using FILE and LABEL."
+  (let ((watcher (list (current-buffer) marker label backend)))
+    (if (file-exists-p file)
+        (md-render--media-apply watcher file nil)
+      (let ((watchers (gethash file md-render--media-jobs)))
+        (puthash file (cons watcher watchers) md-render--media-jobs)
+        (unless watchers
+          (md-render--start-media-process backend source file))))))
+
+(cl-defun md-render--insert-media (&key start end source render-source
+                                        backend block-p label)
+  "Replace START..END with a BACKEND placeholder for SOURCE.
+
+RENDER-SOURCE is passed to the renderer.  BLOCK-P controls whether
+the placeholder occupies its own paragraph.  LABEL identifies
+rendering errors."
+  (let* ((file (md-render--media-cache-file backend render-source))
+         (carried (md-render--carry-properties start))
+         (placeholder (if block-p "\n \n\n" " "))
+         image-position)
+    (delete-region start end)
+    (goto-char start)
+    (insert placeholder)
+    (setq image-position (if block-p (1+ start) start))
+    (add-text-properties
+     start (point)
+     (append
+      carried
+      (list 'md-render-frozen t
+            'md-render-source source
+            'rear-nonsticky '(md-render-frozen
+                              md-render-source
+                              md-render-media-file))))
+    (put-text-property image-position (1+ image-position)
+                       'md-render-media-file file)
+    (md-render--watch-media
+     backend render-source file (copy-marker image-position) label)))
+
+(defun md-render--math-tools-available-p ()
+  "Return non-nil when the local SVG math toolchain is available."
+  (and (executable-find "emacs")
+       (executable-find "latex")
+       (executable-find "dvisvgm")))
+
+(defun md-render--mermaid-tool-available-p ()
+  "Return non-nil when the configured Mermaid command is available."
+  (executable-find md-render-mermaid-command))
+
+(defun md-render--mermaid-browser ()
+  "Return the browser executable Mermaid CLI should use, or nil."
+  (or md-render-mermaid-browser
+      (seq-find
+       #'file-executable-p
+       '("/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
+         "/Applications/Chromium.app/Contents/MacOS/Chromium"
+         "/Applications/Brave Browser.app/Contents/MacOS/Brave Browser"))
+      (executable-find "google-chrome")
+      (executable-find "chromium")
+      (executable-find "chromium-browser")))
+
+(defun md-render--render-fenced-media (context math-available mermaid-available)
+  "Render complete fenced media from CONTEXT when tools are available.
+
+MATH-AVAILABLE and MERMAID-AVAILABLE report the local toolchains."
+  (dolist (block (reverse (map-elt context :source-blocks)))
+    (let ((language (map-elt block :language)))
+      (when (and (map-elt block :complete)
+                 (or (and math-available
+                          (member language '("math" "latex")))
+                     (and mermaid-available
+                          (equal language "mermaid"))))
+        (let* ((start (map-nested-elt block '(:block :start)))
+               (end (map-nested-elt block '(:block :end)))
+               (body (map-elt block :body))
+               (source (buffer-substring-no-properties start end))
+               (math-p (member language '("math" "latex"))))
+          (md-render--insert-media
+           :start start
+           :end end
+           :source source
+           :render-source (if math-p
+                              (format "\\[\n%s\n\\]" body)
+                            body)
+           :backend (if math-p 'math 'mermaid)
+           :block-p t
+           :label (if math-p "Math" "Mermaid")))))))
+
+(defun md-render--render-inline-math (context available)
+  "Render inline and block math from CONTEXT when AVAILABLE.
+
+Return the earliest incomplete math delimiter, or nil."
+  (let ((avoid-ranges
+         (md-render-sort-ranges
+          (md-render--source-block-ranges
+           (map-elt context :source-blocks))
+          (map-elt context :inline-code-ranges)))
+        watermark)
+    (dolist (spec '(("\\(" "\\)") ("\\[" "\\]") ("$$" "$$")))
+      (save-excursion
+        (goto-char (point-min))
+        (while (search-forward (car spec) nil t)
+          (let* ((start (- (point) (length (car spec))))
+                 (avoid
+                  (md-render-in-avoid-range-p
+                   start (1+ start) avoid-ranges)))
+            (cond
+             (avoid
+              (goto-char (cdr avoid)))
+             ((search-forward (cadr spec) nil t)
+              (let ((end (point)))
+                (unless (get-text-property start 'md-render-frozen)
+                  (if available
+                      (let ((source
+                             (buffer-substring-no-properties start end)))
+                        (md-render--insert-media
+                         :start start
+                         :end end
+                         :source source
+                         :render-source source
+                         :backend 'math
+                         :block-p (not (equal (car spec) "\\("))
+                         :label "Math"))
+                    (put-text-property start end
+                                       'md-render-frozen t)))))
+             (t
+              (setq watermark
+                    (if watermark (min watermark start) start))
+              (goto-char (point-max))))))))
+    watermark))
+
+(defun md-render--render-media (context)
+  "Render supported Math and Mermaid regions described by CONTEXT."
+  (when (display-graphic-p)
+    (let ((math-available
+           (and md-render-math-enabled
+                (md-render--math-tools-available-p)))
+          (mermaid-available
+           (and md-render-mermaid-enabled
+                (md-render--mermaid-tool-available-p)))
+          watermark)
+      (when md-render-math-enabled
+        (setq watermark
+              (md-render--render-inline-math context math-available)))
+      (md-render--render-fenced-media
+       context math-available mermaid-available)
+      (and watermark (list (cons :watermark watermark))))))
 
 (cl-defun md-render--replace-bolds (&key avoid-ranges)
   "Replace `**X**' / `__X__' spans in current buffer with bold X.

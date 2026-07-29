@@ -34,8 +34,9 @@ It provides two views of the same buffer:
 - **Org-like structural editing.** Fold sections, navigate headings, promote
   or demote subtrees, continue lists, toggle tasks, and edit table rows and
   columns with familiar keys.
-- **No preview toolchain.** The complete in-buffer renderer does not require
-  Pandoc, Markdown.pl, a browser, or another external Markdown processor.
+- **No required preview toolchain.** The core in-buffer renderer needs no
+  Pandoc, browser, or external Markdown processor. Optional local tools add
+  SVG previews for LaTeX math and PNG previews for Mermaid diagrams.
 - **Small and self-contained.** `md-mode` depends only on Emacs 29.1 or newer.
 
 ## Compared with markdown-mode
@@ -66,6 +67,17 @@ integrations, or long-term compatibility are more important.
 ## Requirements
 
 - Emacs 29.1 or newer
+
+Optional Rendered-view integrations:
+
+- LaTeX math (`\(…\)`, `\[…\]`, `$$…$$`, and fenced `math`/`latex`):
+  `latex` plus `dvisvgm`.
+- Fenced `mermaid` diagrams: Mermaid CLI (`mmdc`) and a local Chrome or
+  Chromium installation.
+
+Both integrations render asynchronously and cache generated images under
+`md-render-cache-directory`. Missing tools leave math literal and Mermaid as a
+normal source block. No document content is sent to a remote service.
 
 ## Installation
 
@@ -233,6 +245,12 @@ coverage of `markdown-mode` are outside its present scope.
 
 Fenced code receives a block face in Edit view. Language-specific syntax
 highlighting remains a Rendered-view feature.
+
+Rendered view also recognizes local LaTeX math and fenced Mermaid diagrams
+when their optional executables are installed. Customize
+`md-render-math-enabled`, `md-render-mermaid-enabled`,
+`md-render-mermaid-browser`, and `md-render-cache-directory` to control these
+integrations.
 
 The TOC, Imenu, and structural commands index ATX headings (`#` through
 `######`) in the current buffer only. Setext headings and project-wide indexes
