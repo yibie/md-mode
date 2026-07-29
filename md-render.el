@@ -52,8 +52,8 @@
 ;;                                         unicode borders, header/zebra rows
 ;;                                         and wrap-to-window-width support
 ;;
-;; All md-render-* faces inherit from the conventional faces
-;; (`bold', `italic', `org-level-N', etc.) so default rendering is
+;; All md-render-* faces inherit from conventional faces
+;; (`bold', `italic', etc.) so default rendering is
 ;; unchanged, while still letting users customize markdown output
 ;; without disturbing the source faces elsewhere.
 ;;
@@ -64,6 +64,7 @@
 ;;; Code:
 
 (require 'cl-lib)
+(require 'color)
 (require 'map)
 (require 'seq)
 (require 'org-faces)
@@ -124,32 +125,32 @@
   "Display title and accent face for each supported callout type.")
 
 (defface md-render-header-1
-  '((t :inherit org-level-1 :height 2.0))
+  '((t :inherit bold :height 2.0))
   "Face for level-1 headers rendered by `md-render-convert'."
   :group 'md-render)
 
 (defface md-render-header-2
-  '((t :inherit org-level-2 :height 1.7))
+  '((t :inherit bold :height 1.7))
   "Face for level-2 headers rendered by `md-render-convert'."
   :group 'md-render)
 
 (defface md-render-header-3
-  '((t :inherit org-level-3 :height 1.4))
+  '((t :inherit bold :height 1.4))
   "Face for level-3 headers rendered by `md-render-convert'."
   :group 'md-render)
 
 (defface md-render-header-4
-  '((t :inherit org-level-4 :height 1.1))
+  '((t :inherit bold :height 1.1))
   "Face for level-4 headers rendered by `md-render-convert'."
   :group 'md-render)
 
 (defface md-render-header-5
-  '((t :inherit org-level-5 :height 1.0))
+  '((t :inherit bold :height 1.0))
   "Face for level-5 headers rendered by `md-render-convert'."
   :group 'md-render)
 
 (defface md-render-header-6
-  '((t :inherit org-level-6 :height 1.0))
+  '((t :inherit bold :height 1.0))
   "Face for level-6 headers rendered by `md-render-convert'."
   :group 'md-render)
 
@@ -159,12 +160,14 @@
   :group 'md-render)
 
 (defface md-render-table-border
-  '((t :inherit font-lock-comment-face))
+  '((t :inherit shadow))
   "Face for table borders (pipes and dashes)."
   :group 'md-render)
 
 (defface md-render-table-zebra
-  '((t :inherit lazy-highlight))
+  '((((class color) (background light)) :background "gray95")
+    (((class color) (background dark)) :background "gray20")
+    (t :inherit highlight))
   "Face for alternating (zebra) data rows in tables."
   :group 'md-render)
 
@@ -592,15 +595,34 @@ this returns `(((:watermark . 1200)))'."
                         nil))
     (nreverse results)))
 
+(defun md-render--dark-background-p ()
+  "Return non-nil when the current default face has a dark background."
+  (if-let* ((background (face-background 'default nil t))
+            ((stringp background))
+            (rgb (ignore-errors (color-name-to-rgb background))))
+      (color-dark-p rgb)
+    (eq (frame-parameter nil 'background-mode) 'dark)))
+
+(defun md-render--theme-foreground ()
+  "Return the current default foreground as a renderer-safe color."
+  (let ((foreground (face-foreground 'default nil t)))
+    (if (and (stringp foreground)
+             (ignore-errors (color-name-to-rgb foreground)))
+        foreground
+      (if (md-render--dark-background-p) "#ffffff" "#000000"))))
+
 (defun md-render--media-cache-file (backend source)
   "Return the cached image path for BACKEND rendering SOURCE."
   (let* ((appearance
           (pcase backend
             ('math
              (list md-render-math-scale
-                   (face-foreground 'default nil t)))
-            ('mermaid
-             (frame-parameter nil 'background-mode))))
+                   (md-render--theme-foreground)
+                   (face-background 'default nil t)))
+            ((or 'mermaid 'plantuml 'graphviz)
+             (list (md-render--theme-foreground)
+                   (face-background 'default nil t)
+                   (md-render--dark-background-p)))))
          (digest
           (secure-hash 'sha256
                        (prin1-to-string
@@ -674,6 +696,17 @@ this returns `(((:watermark . 1200)))'."
       (format "Renderer exited with status %s"
               (process-exit-status process)))))
 
+(defun md-render--plantuml-themed-source (source)
+  "Add theme-aware defaults to PlantUML SOURCE."
+  (if (string-match "^@startuml[^\n]*\n" source)
+      (concat
+       (substring source 0 (match-end 0))
+       "skinparam BackgroundColor transparent\n"
+       "skinparam Monochrome "
+       (if (md-render--dark-background-p) "reverse\n" "true\n")
+       (substring source (match-end 0)))
+    source))
+
 (defun md-render--start-media-process (backend source file)
   "Start an asynchronous BACKEND job rendering SOURCE to FILE."
   (make-directory md-render-cache-directory t)
@@ -693,7 +726,7 @@ this returns `(((:watermark . 1200)))'."
           (pcase backend
             ('math
              (let ((emacs (executable-find "emacs"))
-                   (foreground (face-foreground 'default nil t)))
+                   (foreground (md-render--theme-foreground)))
                (list
                 emacs "-Q" "--batch" "--eval"
                 (prin1-to-string
@@ -718,7 +751,7 @@ this returns `(((:watermark . 1200)))'."
                    "--input" input
                    "--output" file
                    "--theme"
-                   (if (eq (frame-parameter nil 'background-mode) 'dark)
+                   (if (md-render--dark-background-p)
                        "dark"
                      "default")
                    "--backgroundColor" "transparent"
@@ -727,9 +760,21 @@ this returns `(((:watermark . 1200)))'."
              (list (executable-find md-render-plantuml-command)
                    "-tsvg" input))
             ('graphviz
-             (list (executable-find md-render-graphviz-command)
-                   "-Tsvg" input "-o" file)))))
-    (write-region source nil input nil 'silent)
+             (let ((foreground (md-render--theme-foreground)))
+               (list (executable-find md-render-graphviz-command)
+                     "-Tsvg"
+                     "-Gbgcolor=transparent"
+                     (format "-Gfontcolor=%s" foreground)
+                     (format "-Ncolor=%s" foreground)
+                     (format "-Nfontcolor=%s" foreground)
+                     (format "-Ecolor=%s" foreground)
+                     (format "-Efontcolor=%s" foreground)
+                     input "-o" file))))))
+    (write-region
+     (if (eq backend 'plantuml)
+         (md-render--plantuml-themed-source source)
+       source)
+     nil input nil 'silent)
     (condition-case err
         (let ((process-environment
                (pcase backend

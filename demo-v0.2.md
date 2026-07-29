@@ -28,9 +28,6 @@ flowchart LR
 
 ```plantuml
 @startuml
-skinparam ArrowColor white
-skinparam SequenceArrowFontColor white
-skinparam SequenceLifeLineBorderColor white
 Edit -> Render: local SVG
 @enduml
 ```

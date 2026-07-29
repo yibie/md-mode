@@ -2034,6 +2034,59 @@ for a fully-selected buffer."
 (ert-deftest md-render-math-default-scale-matches-org-preview ()
   (should (= md-render-math-scale 1.0)))
 
+(ert-deftest md-render-default-faces-are-theme-neutral ()
+  (dolist (face '(md-render-header-1
+                  md-render-header-2
+                  md-render-header-3
+                  md-render-header-4
+                  md-render-header-5
+                  md-render-header-6))
+    (should (eq (face-attribute face :inherit nil nil) 'bold)))
+  (should
+   (eq (face-attribute 'md-render-table-border :inherit nil nil)
+       'shadow))
+  (should-not
+   (eq (face-attribute 'md-render-table-zebra :inherit nil nil)
+       'lazy-highlight)))
+
+(ert-deftest md-render-diagram-cache-tracks-theme-colors ()
+  (let ((md-render-cache-directory temporary-file-directory)
+        (dark nil))
+    (cl-letf (((symbol-function 'face-foreground)
+               (lambda (&rest _)
+                 (if dark "#ffffff" "#000000")))
+              ((symbol-function 'face-background)
+               (lambda (&rest _)
+                 (if dark "#000000" "#ffffff")))
+              ((symbol-function 'frame-parameter)
+               (lambda (&rest _)
+                 (if dark 'dark 'light))))
+      (dolist (backend '(plantuml graphviz))
+        (let ((light-file
+               (md-render--media-cache-file backend "source")))
+          (setq dark t)
+          (should-not
+           (equal light-file
+                  (md-render--media-cache-file backend "source")))
+          (setq dark nil))))))
+
+(ert-deftest md-render-plantuml-source-follows-theme-background ()
+  (let ((source "@startuml\nEdit -> Render: local SVG\n@enduml\n"))
+    (cl-letf (((symbol-function 'md-render--dark-background-p)
+               (lambda () nil)))
+      (let ((themed (md-render--plantuml-themed-source source)))
+        (should
+         (string-match-p
+          "skinparam BackgroundColor transparent" themed))
+        (should
+         (string-match-p "skinparam Monochrome true" themed))))
+    (cl-letf (((symbol-function 'md-render--dark-background-p)
+               (lambda () t)))
+      (should
+       (string-match-p
+        "skinparam Monochrome reverse"
+        (md-render--plantuml-themed-source source))))))
+
 (ert-deftest md-render-cached-inline-math-displays-svg-and-reconstructs ()
   (with-temp-buffer
     (let ((md-render-math-enabled t)
@@ -2211,6 +2264,8 @@ for a fully-selected buffer."
                          (lambda (candidate)
                            (and (equal candidate executable)
                                 (concat "/fake/" candidate))))
+                        ((symbol-function 'md-render--theme-foreground)
+                         (lambda () "#123456"))
                         ((symbol-function 'make-process)
                          (lambda (&rest arguments)
                            (setq process-arguments arguments)
@@ -2231,8 +2286,18 @@ for a fully-selected buffer."
                     ('graphviz
                      (should (equal
                               (list (cadr command)
-                                    (nth 3 command))
+                                    (car (last command 2)))
                               (list "-Tsvg" "-o")))
+                     (should
+                      (member "-Gbgcolor=transparent" command))
+                     (should
+                      (member "-Ncolor=#123456" command))
+                     (should
+                      (member "-Nfontcolor=#123456" command))
+                     (should
+                      (member "-Ecolor=#123456" command))
+                     (should
+                      (member "-Efontcolor=#123456" command))
                      (should
                       (equal graphviz-server-name "md-render")))))))))
       (delete-directory cache-directory t))))
