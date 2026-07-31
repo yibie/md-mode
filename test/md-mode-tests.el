@@ -1144,6 +1144,18 @@
     (should-not (buffer-modified-p))
     (should (equal (buffer-string) md-mode-tests--source))))
 
+(ert-deftest md-mode-show-source-keeps-current-rendered-position ()
+  (with-temp-buffer
+    (insert "# First\n\n## Edit here.\n")
+    (md-mode)
+    (goto-char (point-min))
+    (md-mode-render)
+    (goto-char (point-min))
+    (search-forward "Edit here.")
+    (goto-char (match-beginning 0))
+    (md-mode-show-source)
+    (should (looking-at-p "Edit here."))))
+
 (ert-deftest md-mode-first-render-survives-initial-fontification ()
   (with-temp-buffer
     (insert "# Title\n\nBody\n")

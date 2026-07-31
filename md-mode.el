@@ -91,9 +91,6 @@ not load or require `markdown-mode'."
 (defvar-local md-mode--rendered-p nil
   "Non-nil when the current buffer displays rendered Markdown.")
 
-(defvar-local md-mode--source-point nil
-  "Point to restore when returning to Markdown source.")
-
 (defvar-local md-mode--toc-buffer nil
   "Table of contents buffer associated with this Markdown buffer.")
 
@@ -2133,6 +2130,33 @@ When the region is active, use its lines as the callout body."
       (md-mode-outdent-list-item)
     (outline-cycle-buffer)))
 
+(defun md-mode--source-position-at-point ()
+  "Return the source position corresponding to point in rendered Markdown."
+  (let* ((position (point))
+         (source (and (< position (point-max))
+                      (get-text-property position 'md-render-source)))
+         (run-start
+          (and source
+               (previous-single-property-change
+                (min (1+ position) (point-max))
+                'md-render-source nil (point-min))))
+         (run-end
+          (and source
+               (next-single-property-change
+                position 'md-render-source nil (point-max))))
+         (visible
+          (and run-start run-end
+               (buffer-substring-no-properties run-start run-end)))
+         (source-offset
+          (and visible
+               (string-search visible (substring-no-properties source))))
+         (prefix-end (if source-offset run-start position)))
+    (+ (point-min)
+       (length (md-render-reconstruct (point-min) prefix-end))
+       (if source-offset
+           (+ source-offset (- position run-start))
+         0))))
+
 ;;;###autoload
 (defun md-mode-render ()
   "Render Markdown in the current buffer and make it read-only."
@@ -2141,7 +2165,6 @@ When the region is active, use its lines as the callout body."
   (unless md-mode--rendered-p
     (outline-show-all)
     (let ((modified (buffer-modified-p))
-          (source-point (point))
           (buffer-undo-list t)
           (inhibit-read-only t)
           ;; Rendering is a view change, not an edit: a nil
@@ -2157,7 +2180,6 @@ When the region is active, use its lines as the callout body."
           (font-lock-ensure))
         (with-silent-modifications
           (md-render-replace-markup :force t)))
-      (setq md-mode--source-point source-point)
       (md-mode--set-rendered-p t)
       (md-mode--scale-heading-fallback-font)
       (set-buffer-modified-p modified)
@@ -2169,7 +2191,7 @@ When the region is active, use its lines as the callout body."
   (interactive)
   (when md-mode--rendered-p
     (let ((modified (buffer-modified-p))
-          (source-point md-mode--source-point)
+          (source-point nil)
           (buffer-undo-list t)
           (inhibit-read-only t)
           ;; Restoring source is a view change, not an edit — see
@@ -2180,14 +2202,14 @@ When the region is active, use its lines as the callout body."
           (buffer-file-truename nil))
       (save-restriction
         (widen)
+        (setq source-point (md-mode--source-position-at-point))
         (with-silent-modifications
           (let ((source (md-render-reconstruct (point-min) (point-max))))
             (erase-buffer)
             (insert source))))
       (md-mode--set-rendered-p nil)
       (font-lock-flush)
-      (goto-char (min (or source-point (point-min)) (point-max)))
-      (setq md-mode--source-point nil)
+      (goto-char (min source-point (point-max)))
       (set-buffer-modified-p modified)
       (md-mode--refresh-toc))))
 
@@ -2204,7 +2226,6 @@ When the region is active, use its lines as the callout body."
 (define-derived-mode md-mode text-mode "MD"
   "Major mode for editing and rendering Markdown source."
   (setq-local md-mode--rendered-p nil)
-  (setq-local md-mode--source-point nil)
   (setq-local font-lock-defaults '(md-mode--font-lock-keywords))
   (setq-local font-lock-extra-managed-props
               (cons 'display font-lock-extra-managed-props))
