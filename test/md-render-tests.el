@@ -2034,14 +2034,39 @@ for a fully-selected buffer."
 (ert-deftest md-render-math-default-scale-matches-org-preview ()
   (should (= md-render-math-scale 1.0)))
 
-(ert-deftest md-render-default-faces-are-theme-neutral ()
-  (dolist (face '(md-render-header-1
-                  md-render-header-2
-                  md-render-header-3
-                  md-render-header-4
-                  md-render-header-5
-                  md-render-header-6))
-    (should (eq (face-attribute face :inherit nil nil) 'bold)))
+(ert-deftest md-render-default-faces-adapt-to-display ()
+  (cl-mapc
+   (lambda (face org-face dark-color light-color)
+     (let* ((spec (get face 'face-defface-spec))
+            (tty-dark (nth 0 spec))
+            (tty-light (nth 1 spec))
+            (gui (nth 2 spec)))
+       (should
+        (equal (car tty-dark) '((type tty) (background dark))))
+       (should
+        (equal (car tty-light) '((type tty) (background light))))
+       (should (eq (plist-get (cdr tty-dark) :inherit) org-face))
+       (should (eq (plist-get (cdr tty-light) :inherit) org-face))
+       (should (equal (plist-get (cdr tty-dark) :foreground)
+                      dark-color))
+       (should (equal (plist-get (cdr tty-light) :foreground)
+                      light-color))
+       (should (eq (car gui) t))
+       (should (eq (plist-get (cdr gui) :inherit) 'bold))))
+   '(md-render-header-1
+     md-render-header-2
+     md-render-header-3
+     md-render-header-4
+     md-render-header-5
+     md-render-header-6)
+   '(org-level-1
+     org-level-2
+     org-level-3
+     org-level-4
+     org-level-5
+     org-level-6)
+   '("#ffffff" "#d2b580" "#82b0ec" "#feacd0" "#88ca9f" "#ff9580")
+   '("#000000" "#624416" "#193668" "#721045" "#2a5045" "#7f0000"))
   (should
    (eq (face-attribute 'md-render-table-border :inherit nil nil)
        'shadow))

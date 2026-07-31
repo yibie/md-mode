@@ -125,32 +125,56 @@
   "Display title and accent face for each supported callout type.")
 
 (defface md-render-header-1
-  '((t :inherit bold :height 2.0))
+  '((((type tty) (background dark))
+     :inherit org-level-1 :foreground "#ffffff")
+    (((type tty) (background light))
+     :inherit org-level-1 :foreground "#000000")
+    (t :inherit bold :height 2.0))
   "Face for level-1 headers rendered by `md-render-convert'."
   :group 'md-render)
 
 (defface md-render-header-2
-  '((t :inherit bold :height 1.7))
+  '((((type tty) (background dark))
+     :inherit org-level-2 :foreground "#d2b580")
+    (((type tty) (background light))
+     :inherit org-level-2 :foreground "#624416")
+    (t :inherit bold :height 1.7))
   "Face for level-2 headers rendered by `md-render-convert'."
   :group 'md-render)
 
 (defface md-render-header-3
-  '((t :inherit bold :height 1.4))
+  '((((type tty) (background dark))
+     :inherit org-level-3 :foreground "#82b0ec")
+    (((type tty) (background light))
+     :inherit org-level-3 :foreground "#193668")
+    (t :inherit bold :height 1.4))
   "Face for level-3 headers rendered by `md-render-convert'."
   :group 'md-render)
 
 (defface md-render-header-4
-  '((t :inherit bold :height 1.1))
+  '((((type tty) (background dark))
+     :inherit org-level-4 :foreground "#feacd0")
+    (((type tty) (background light))
+     :inherit org-level-4 :foreground "#721045")
+    (t :inherit bold :height 1.1))
   "Face for level-4 headers rendered by `md-render-convert'."
   :group 'md-render)
 
 (defface md-render-header-5
-  '((t :inherit bold :height 1.0))
+  '((((type tty) (background dark))
+     :inherit org-level-5 :foreground "#88ca9f")
+    (((type tty) (background light))
+     :inherit org-level-5 :foreground "#2a5045")
+    (t :inherit bold :height 1.0))
   "Face for level-5 headers rendered by `md-render-convert'."
   :group 'md-render)
 
 (defface md-render-header-6
-  '((t :inherit bold :height 1.0))
+  '((((type tty) (background dark))
+     :inherit org-level-6 :foreground "#ff9580")
+    (((type tty) (background light))
+     :inherit org-level-6 :foreground "#7f0000")
+    (t :inherit bold :height 1.0))
   "Face for level-6 headers rendered by `md-render-convert'."
   :group 'md-render)
 

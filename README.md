@@ -282,6 +282,13 @@ Like Org, each level also has its own face. Use `M-x customize-face` with
 level. A saved face customization takes precedence over the scaling values,
 which remain independent of `markdown-mode` face compatibility.
 
+Graphical frames keep these faces color-neutral and distinguish levels with
+the configured relative heights. Terminal frames cannot vary font size, so
+they use separate high-contrast palettes for dark and light backgrounds while
+inheriting other attributes from `org-level-1` through `org-level-6`. Users can
+override any level with `M-x customize-face`, and themes may customize the
+`md-render-header-*` faces directly.
+
 ### CJK font sizing
 
 Heading faces use relative heights. If a CJK fallback font is configured with
