@@ -937,8 +937,12 @@ ignored."
                    `(md-mode-toc-target ,marker
                      mouse-face highlight
                      help-echo "RET or mouse-1: visit heading"
-                     face ,(intern
-                            (format "outline-%d" (min level 8)))))
+                     face ((:height 1.0)
+                           ,(intern
+                             (format "md-render-header-%d"
+                                     (min level 6)))
+                           ,(intern
+                             (format "outline-%d" (min level 8))))))
                   (push marker md-mode--toc-markers))))))
         (when (buffer-live-p source)
           (with-current-buffer source
