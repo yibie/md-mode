@@ -2222,9 +2222,20 @@ When the region is active, use its lines as the callout body."
   "Toggle between editable Markdown source and rendered view."
   (interactive)
   (md-mode--ensure-mode)
-  (if md-mode--rendered-p
-      (md-mode-show-source)
-    (md-mode-render)))
+  (let* ((window (selected-window))
+         (displayed-p (eq (window-buffer window) (current-buffer)))
+         (screen-row
+          (and displayed-p
+               (or (nth 1 (window-line-height nil window))
+                   (max 0
+                        (1- (count-screen-lines
+                             (window-start window) (point) nil
+                             window)))))))
+    (if md-mode--rendered-p
+        (md-mode-show-source)
+      (md-mode-render))
+    (when screen-row
+      (recenter screen-row))))
 
 ;;;###autoload
 (define-derived-mode md-mode text-mode "MD"

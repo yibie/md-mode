@@ -1168,6 +1168,31 @@
     (md-mode-show-source)
     (should (looking-at-p "Edit here."))))
 
+(ert-deftest md-mode-toggle-markup-keeps-current-screen-row ()
+  (save-window-excursion
+    (with-temp-buffer
+      (let ((window (selected-window)))
+        (set-window-buffer window (current-buffer))
+        (insert "# First\n\nBefore\n\n"
+                "```text\none\ntwo\n```\n\n"
+                "## Point B\nAfter\n")
+        (md-mode)
+        (goto-char (point-min))
+        (search-forward "Point B")
+        (goto-char (match-beginning 0))
+        (set-window-start window (point-min))
+        (let (recenter-rows)
+          (cl-letf (((symbol-function 'window-line-height)
+                     (lambda (&rest _) '(1 7 7 0)))
+                    ((symbol-function 'recenter)
+                     (lambda (row)
+                       (push row recenter-rows))))
+            (md-mode-toggle-markup)
+            (should (looking-at-p "Point B"))
+            (md-mode-toggle-markup)
+            (should (looking-at-p "Point B")))
+          (should (equal (nreverse recenter-rows) '(7 7))))))))
+
 (ert-deftest md-mode-first-render-survives-initial-fontification ()
   (with-temp-buffer
     (insert "# Title\n\nBody\n")
