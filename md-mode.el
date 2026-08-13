@@ -59,6 +59,28 @@
   :type 'boolean
   :group 'md)
 
+(defcustom md-mode-clip-wide-tables t
+  "When non-nil, clip table rows wider than the window.
+
+Clipped rows end at the window edge with dots in the right
+fringe.  When nil, wide rows overflow the window edge instead —
+`truncate-lines' is enabled so the rest of the row can be
+reached with horizontal scrolling (`scroll-right', bound to
+\\[scroll-right]).
+
+Markdown table rows must stay on one line in the source, so this
+option only chooses between clipping the overflow and leaving it
+scrollable.  Note that disabling the clip enables `truncate-lines'
+for the whole buffer, not just tables."
+  :type 'boolean
+  :group 'md
+  :set (lambda (symbol value)
+         (set-default symbol value)
+         (dolist (buffer (buffer-list))
+           (with-current-buffer buffer
+             (when (derived-mode-p 'md-mode)
+               (md-mode--apply-table-clipping))))))
+
 (defcustom md-mode-use-markdown-mode-faces t
   "When non-nil, reuse available `markdown-mode' faces.
 
@@ -1544,8 +1566,12 @@ When the region is active, use its lines as the callout body."
       (delete-overlay overlay))))
 
 (defun md-mode--add-table-overflow (start end window)
-  "Add table overflow overlays between START and END for WINDOW."
-  (with-selected-window window
+  "Add table overflow overlays between START and END for WINDOW.
+
+Does nothing when `md-mode-clip-wide-tables' is nil — wide rows
+are then left to overflow the window edge instead."
+  (when md-mode-clip-wide-tables
+    (with-selected-window window
     (save-excursion
       (goto-char start)
       (while (< (point) end)
@@ -1564,7 +1590,7 @@ When the region is active, use its lines as the callout body."
               (overlay-put overlay 'invisible t)
               (overlay-put overlay 'window window)
               (overlay-put overlay 'evaporate t))))
-        (forward-line 1)))))
+        (forward-line 1))))))
 
 (defun md-mode--truncate-tables-in-region (start end)
   "Refresh wide table overlays between START and END."
@@ -1581,6 +1607,15 @@ When the region is active, use its lines as the callout body."
   (remove-overlays
    (point-min) (point-max) 'category 'md-mode-table-overflow)
   (md-mode--truncate-tables-in-region (point-min) (point-max)))
+
+(defun md-mode--apply-table-clipping ()
+  "Apply `md-mode-clip-wide-tables' to the current buffer.
+
+Wide rows must overflow the window edge to be reachable by
+horizontal scrolling, so `truncate-lines' is enabled whenever
+clipping is off.  Refreshes the overflow overlays afterwards."
+  (setq-local truncate-lines (not md-mode-clip-wide-tables))
+  (md-mode--truncate-tables-in-buffer))
 
 (defun md-mode--stop-table-overflow ()
   "Stop refreshing and remove table overflow overlays."
@@ -2299,7 +2334,7 @@ When the region is active, use its lines as the callout body."
   (jit-lock-register #'md-mode--truncate-tables-in-region)
   (md-mode--auto-align-tables)
   (md-mode--fold-initial-front-matter)
-  (md-mode--truncate-tables-in-buffer))
+  (md-mode--apply-table-clipping))
 
 ;;;###autoload
 (add-to-list 'auto-mode-alist '("\\.md\\'" . md-mode))

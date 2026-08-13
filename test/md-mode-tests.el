@@ -864,6 +864,21 @@
     (goto-char (point-min))
     (should (equal (get-text-property (point) 'display) "│"))))
 
+(ert-deftest md-mode-clip-wide-tables-option ()
+  ;; Disabling the clip turns on `truncate-lines' so wide rows can be
+  ;; scrolled horizontally, and skips the overflow overlays.
+  (let ((md-mode-clip-wide-tables nil))
+    (with-temp-buffer
+      (insert "| A | B |\n|---|---|\n| x | y |\n")
+      (md-mode)
+      (should truncate-lines)
+      (should-not (overlays-in (point-min) (point-max)))))
+  (let ((md-mode-clip-wide-tables t))
+    (with-temp-buffer
+      (insert "| A | B |\n|---|---|\n| x | y |\n")
+      (md-mode)
+      (should-not truncate-lines))))
+
 (ert-deftest md-mode-aligns-table-padding-by-pixel-width ()
   (with-temp-buffer
     (let ((md-mode-auto-align-tables nil))

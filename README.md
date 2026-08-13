@@ -171,9 +171,12 @@ styled as you type.
 
 Rows wider than the window are clipped at the window edge with dots in
 the right fringe — the source row stays on one line (Markdown requires
-it), so the rest cannot be reached by horizontal scrolling.  Switch to
-the rendered view with `C-c C-v` to see wide tables wrapped to the
-window width instead.
+it).  Set `md-mode-clip-wide-tables` to `nil` to leave wide rows
+overflowing the window edge instead, so the rest of the row can be
+reached with horizontal scrolling (`C-x >`); note this enables
+`truncate-lines` for the whole buffer.  Alternatively, switch to the
+rendered view with `C-c C-v`, where wide tables wrap to the window
+width.
 
 ### Links and blocks
 
@@ -201,6 +204,7 @@ Editing and structure:
 | Option | Default | Purpose |
 |--------|---------|---------|
 | `md-mode-auto-align-tables` | `t` | Align Markdown tables when entering `md-mode` |
+| `md-mode-clip-wide-tables` | `t` | Clip wide table rows at the window edge with fringe dots; `nil` leaves them overflowing and scrollable |
 | `md-mode-fold-front-matter-on-open` | `nil` | Start with front matter folded |
 | `md-mode-use-markdown-mode-faces` | `t` | Reuse compatible faces when `markdown-mode` faces are already loaded |
 | `md-mode-toc-side` | `left` | Open the TOC on the left or right |
