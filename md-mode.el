@@ -1595,7 +1595,14 @@ are then left to overflow the window edge instead."
         (forward-line 1))))))
 
 (defun md-mode--truncate-tables-in-region (start end)
-  "Refresh wide table overlays between START and END."
+  "Refresh wide table overlays between START and END.
+
+Also keeps `truncate-lines' in step with `md-mode-clip-wide-tables'
+— this runs from jit-lock, so buffers enabled by older versions of
+the mode self-heal on the next fontification."
+  (let ((wanted (if md-mode--rendered-p nil (not md-mode-clip-wide-tables))))
+    (unless (eq truncate-lines wanted)
+      (setq-local truncate-lines wanted)))
   (let ((regions (md-mode--table-regions start end)))
     (dolist (window (get-buffer-window-list (current-buffer) nil t))
       (dolist (region regions)
@@ -1615,10 +1622,7 @@ are then left to overflow the window edge instead."
 
 Wide rows must overflow the window edge to be reachable by
 horizontal scrolling, so `truncate-lines' is enabled whenever
-clipping is off.  The rendered view always wraps.  Refreshes the
-overflow overlays afterwards."
-  (setq-local truncate-lines
-              (if md-mode--rendered-p nil (not md-mode-clip-wide-tables)))
+clipping is off.  The rendered view always wraps."
   (md-mode--truncate-tables-in-buffer))
 
 (defun md-mode--stop-table-overflow ()
