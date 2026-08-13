@@ -865,14 +865,17 @@
     (should (equal (get-text-property (point) 'display) "│"))))
 
 (ert-deftest md-mode-clip-wide-tables-option ()
-  ;; Disabling the clip turns on `truncate-lines' so wide rows can be
-  ;; scrolled horizontally, and skips the overflow overlays.
+  ;; Wide rows are scrollable by default: `truncate-lines' on, no
+  ;; overflow overlays.  Enabling the clip restores the fringe-dot
+  ;; truncation.  The rendered view always wraps.
   (let ((md-mode-clip-wide-tables nil))
     (with-temp-buffer
       (insert "| A | B |\n|---|---|\n| x | y |\n")
       (md-mode)
       (should truncate-lines)
-      (should-not (overlays-in (point-min) (point-max)))))
+      (should-not (overlays-in (point-min) (point-max)))
+      (md-mode-toggle-markup)
+      (should-not truncate-lines)))
   (let ((md-mode-clip-wide-tables t))
     (with-temp-buffer
       (insert "| A | B |\n|---|---|\n| x | y |\n")
@@ -1104,8 +1107,11 @@
       (should (string-match-p "\\` +\\'" display)))))
 
 (ert-deftest md-mode-truncates-wide-table-without-changing-source ()
+  ;; With `md-mode-clip-wide-tables' enabled, wide rows get a
+  ;; fringe-dots overflow overlay while the source stays untouched.
   (save-window-excursion
-    (let ((buffer (generate-new-buffer " *md-mode-wide-table*")))
+    (let ((buffer (generate-new-buffer " *md-mode-wide-table*"))
+          (md-mode-clip-wide-tables t))
       (unwind-protect
           (progn
             (set-window-buffer (selected-window) buffer)

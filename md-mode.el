@@ -59,19 +59,21 @@
   :type 'boolean
   :group 'md)
 
-(defcustom md-mode-clip-wide-tables t
+(defcustom md-mode-clip-wide-tables nil
   "When non-nil, clip table rows wider than the window.
 
-Clipped rows end at the window edge with dots in the right
-fringe.  When nil, wide rows overflow the window edge instead —
-`truncate-lines' is enabled so the rest of the row can be
-reached with horizontal scrolling (`scroll-right', bound to
+By default wide rows overflow the window edge with
+`truncate-lines' enabled, so the rest of the row can be reached
+with horizontal scrolling (`scroll-right', bound to
 \\[scroll-right]).
 
+When non-nil, overflowing rows end at the window edge with dots
+in the right fringe instead.
+
 Markdown table rows must stay on one line in the source, so this
-option only chooses between clipping the overflow and leaving it
-scrollable.  Note that disabling the clip enables `truncate-lines'
-for the whole buffer, not just tables."
+option only chooses between leaving the overflow scrollable and
+clipping it.  `truncate-lines' applies to the whole buffer, not
+just tables; the rendered view always wraps."
   :type 'boolean
   :group 'md
   :set (lambda (symbol value)
@@ -1613,8 +1615,10 @@ are then left to overflow the window edge instead."
 
 Wide rows must overflow the window edge to be reachable by
 horizontal scrolling, so `truncate-lines' is enabled whenever
-clipping is off.  Refreshes the overflow overlays afterwards."
-  (setq-local truncate-lines (not md-mode-clip-wide-tables))
+clipping is off.  The rendered view always wraps.  Refreshes the
+overflow overlays afterwards."
+  (setq-local truncate-lines
+              (if md-mode--rendered-p nil (not md-mode-clip-wide-tables)))
   (md-mode--truncate-tables-in-buffer))
 
 (defun md-mode--stop-table-overflow ()
@@ -1708,6 +1712,11 @@ clipping is off.  Refreshes the overflow overlays afterwards."
             (delq 'display font-lock-extra-managed-props)
           (cons 'display
                 (delq 'display font-lock-extra-managed-props))))
+  ;; The rendered view always wraps (tables wrap to the window
+  ;; width); the edit view leaves wide rows scrollable unless
+  ;; clipping is enabled.
+  (setq-local truncate-lines
+              (if rendered nil (not md-mode-clip-wide-tables)))
   (force-mode-line-update))
 
 (defun md-mode--escaped-p (position)

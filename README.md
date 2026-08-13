@@ -27,8 +27,9 @@ It provides two views of the same buffer:
   callouts, and table decoration are visible without leaving the source
   buffer.
 - **Tables that remain Markdown.** Tables auto-align, display with box-drawing
-  borders, truncate cleanly at the window edge, and can be created or deleted
-  as complete structures. The file still contains normal pipe-table syntax.
+  borders, stay scrollable when wider than the window, and can be created or
+  deleted as complete structures. The file still contains normal pipe-table
+  syntax.
 - **Structure beside the document.** A live TOC shows ATX headings in a side
   window and jumps through the same marker-backed index used by Imenu.
 - **Org-like structural editing.** Fold sections, navigate headings, promote
@@ -169,14 +170,12 @@ styled as you type.
 | M-S-Up / M-S-Down          | Delete / insert a row                       |
 | M-x md-mode-delete-table   | Delete the complete table at point          |
 
-Rows wider than the window are clipped at the window edge with dots in
-the right fringe — the source row stays on one line (Markdown requires
-it).  Set `md-mode-clip-wide-tables` to `nil` to leave wide rows
-overflowing the window edge instead, so the rest of the row can be
-reached with horizontal scrolling (`C-x >`); note this enables
-`truncate-lines` for the whole buffer.  Alternatively, switch to the
-rendered view with `C-c C-v`, where wide tables wrap to the window
-width.
+Rows wider than the window overflow the window edge (`truncate-lines`
+is enabled) and can be reached with horizontal scrolling (`C-x >`) —
+the source row stays on one line, as Markdown requires.  Prefer the
+old fringe-dots clipping?  Set `md-mode-clip-wide-tables` to `t`.  In
+the rendered view (`C-c C-v`), wide tables wrap to the window width
+instead.
 
 ### Links and blocks
 
@@ -204,7 +203,7 @@ Editing and structure:
 | Option | Default | Purpose |
 |--------|---------|---------|
 | `md-mode-auto-align-tables` | `t` | Align Markdown tables when entering `md-mode` |
-| `md-mode-clip-wide-tables` | `t` | Clip wide table rows at the window edge with fringe dots; `nil` leaves them overflowing and scrollable |
+| `md-mode-clip-wide-tables` | `nil` | Leave wide table rows overflowing the window edge and scrollable; `t` clips them at the edge with fringe dots |
 | `md-mode-fold-front-matter-on-open` | `nil` | Start with front matter folded |
 | `md-mode-use-markdown-mode-faces` | `t` | Reuse compatible faces when `markdown-mode` faces are already loaded |
 | `md-mode-toc-side` | `left` | Open the TOC on the left or right |
