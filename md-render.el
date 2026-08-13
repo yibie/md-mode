@@ -230,8 +230,8 @@ When nil, fall back to ASCII pipes and dashes."
   "When non-nil, wrap table columns to fit within window width.
 
 When nil (the default), tables render at their natural width —
-wide tables overflow the window edge and can be reached with
-horizontal scrolling."
+wide tables overflow the window edge and the view follows the
+cursor as it moves right (auto-hscroll)."
   :type 'boolean
   :group 'md-render)
 

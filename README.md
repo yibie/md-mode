@@ -171,11 +171,11 @@ styled as you type.
 | M-x md-mode-delete-table   | Delete the complete table at point          |
 
 Rows wider than the window overflow the window edge (`truncate-lines`
-is enabled) and can be reached with horizontal scrolling (`C-x >`) —
-the source row stays on one line, as Markdown requires.  Prefer the
+is enabled) and the view follows the cursor as it moves right — the
+source row stays on one line, as Markdown requires.  Prefer the
 old fringe-dots clipping?  Set `md-mode-clip-wide-tables` to `t`.
 The rendered view (`C-c C-v`) keeps the same behavior: wide tables
-render at natural width and stay scrollable.  Set
+render at natural width and scroll with the cursor.  Set
 `md-render-table-wrap-columns` to `t` to wrap them to the window
 width instead.
 
