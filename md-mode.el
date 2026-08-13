@@ -73,7 +73,7 @@ in the right fringe instead.
 Markdown table rows must stay on one line in the source, so this
 option only chooses between leaving the overflow scrollable and
 clipping it.  `truncate-lines' applies to the whole buffer, not
-just tables; the rendered view always wraps."
+just tables."
   :type 'boolean
   :group 'md
   :set (lambda (symbol value)
@@ -1600,7 +1600,7 @@ are then left to overflow the window edge instead."
 Also keeps `truncate-lines' in step with `md-mode-clip-wide-tables'
 — this runs from jit-lock, so buffers enabled by older versions of
 the mode self-heal on the next fontification."
-  (let ((wanted (if md-mode--rendered-p nil (not md-mode-clip-wide-tables))))
+  (let ((wanted (not md-mode-clip-wide-tables)))
     (unless (eq truncate-lines wanted)
       (setq-local truncate-lines wanted)))
   (let ((regions (md-mode--table-regions start end)))
@@ -1622,7 +1622,8 @@ the mode self-heal on the next fontification."
 
 Wide rows must overflow the window edge to be reachable by
 horizontal scrolling, so `truncate-lines' is enabled whenever
-clipping is off.  The rendered view always wraps."
+clipping is off.  Applies to both the edit and the rendered
+view."
   (md-mode--truncate-tables-in-buffer))
 
 (defun md-mode--stop-table-overflow ()
@@ -1716,11 +1717,6 @@ clipping is off.  The rendered view always wraps."
             (delq 'display font-lock-extra-managed-props)
           (cons 'display
                 (delq 'display font-lock-extra-managed-props))))
-  ;; The rendered view always wraps (tables wrap to the window
-  ;; width); the edit view leaves wide rows scrollable unless
-  ;; clipping is enabled.
-  (setq-local truncate-lines
-              (if rendered nil (not md-mode-clip-wide-tables)))
   (force-mode-line-update))
 
 (defun md-mode--escaped-p (position)

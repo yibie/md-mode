@@ -173,9 +173,11 @@ styled as you type.
 Rows wider than the window overflow the window edge (`truncate-lines`
 is enabled) and can be reached with horizontal scrolling (`C-x >`) —
 the source row stays on one line, as Markdown requires.  Prefer the
-old fringe-dots clipping?  Set `md-mode-clip-wide-tables` to `t`.  In
-the rendered view (`C-c C-v`), wide tables wrap to the window width
-instead.
+old fringe-dots clipping?  Set `md-mode-clip-wide-tables` to `t`.
+The rendered view (`C-c C-v`) keeps the same behavior: wide tables
+render at natural width and stay scrollable.  Set
+`md-render-table-wrap-columns` to `t` to wrap them to the window
+width instead.
 
 ### Links and blocks
 
@@ -217,7 +219,7 @@ Rendered images and tables:
 | `md-render-image-max-width` | `0.4` | Limit inline images by a window-width ratio or pixel count |
 | `md-render-prettify-tables` | `t` | Render tables with aligned columns |
 | `md-render-table-use-unicode-borders` | `t` | Use Unicode rather than ASCII table borders |
-| `md-render-table-wrap-columns` | `t` | Wrap table cells to fit the window |
+| `md-render-table-wrap-columns` | `nil` | Wrap table cells to fit the window; `nil` renders wide tables at natural width (scrollable) |
 | `md-render-table-max-width-fraction` | `0.9` | Limit wrapped tables to a fraction of the window width |
 | `md-render-table-zebra-stripe` | `t` | Alternate table row backgrounds |
 

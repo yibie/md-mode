@@ -865,9 +865,9 @@
     (should (equal (get-text-property (point) 'display) "│"))))
 
 (ert-deftest md-mode-clip-wide-tables-option ()
-  ;; Wide rows are scrollable by default: `truncate-lines' on, no
-  ;; overflow overlays.  Enabling the clip restores the fringe-dot
-  ;; truncation.  The rendered view always wraps.
+  ;; Wide rows are scrollable by default in both views: `truncate-lines'
+  ;; on, no overflow overlays.  Enabling the clip restores the
+  ;; fringe-dot truncation.
   (let ((md-mode-clip-wide-tables nil))
     (with-temp-buffer
       (insert "| A | B |\n|---|---|\n| x | y |\n")
@@ -875,7 +875,7 @@
       (should truncate-lines)
       (should-not (overlays-in (point-min) (point-max)))
       (md-mode-toggle-markup)
-      (should-not truncate-lines)))
+      (should truncate-lines)))
   (let ((md-mode-clip-wide-tables t))
     (with-temp-buffer
       (insert "| A | B |\n|---|---|\n| x | y |\n")

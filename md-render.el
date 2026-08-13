@@ -226,8 +226,12 @@ When nil, fall back to ASCII pipes and dashes."
   :type 'boolean
   :group 'md-render)
 
-(defcustom md-render-table-wrap-columns t
-  "When non-nil, wrap table columns to fit within window width."
+(defcustom md-render-table-wrap-columns nil
+  "When non-nil, wrap table columns to fit within window width.
+
+When nil (the default), tables render at their natural width —
+wide tables overflow the window edge and can be reached with
+horizontal scrolling."
   :type 'boolean
   :group 'md-render)
 
@@ -2072,6 +2076,13 @@ Stored in the destination buffer (the one displayed in the
 window passed to the measurement helpers), so cache lookups are
 per-destination.")
 
+(defconst md-render--table-measure-x-limit 100000
+  "Maximum X in pixels for `window-text-pixel-size' measurements.
+
+Without an X limit the measurement is clipped at the window
+width, which would under-measure wide table cells and skew
+natural column widths.")
+
 (defun md-render--table-measure-string (str window)
   "Return real pixel width of STR rendered at point-max of WINDOW's buffer.
 
@@ -2100,7 +2111,12 @@ preserved so callers never observe the mutation."
           (put-text-property m (point) 'fontified t)
           ;; Strip `line-prefix' / `wrap-prefix' before measuring
           (remove-text-properties m (point) '(line-prefix nil wrap-prefix nil))
-          (setq real (car (window-text-pixel-size window m (point))))
+          ;; X-LIMIT keeps `window-text-pixel-size' from clipping the
+          ;; measurement at the window width — long cells (wide tables)
+          ;; would otherwise under-measure their natural column widths.
+          (setq real (car (window-text-pixel-size
+                           window m (point)
+                           md-render--table-measure-x-limit)))
           (delete-region m (point))
           (set-marker m nil)))
       (set-buffer-modified-p modified)

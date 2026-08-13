@@ -733,7 +733,8 @@ after" nil)))))
   ;; column shrinks and its content wraps at word boundaries.
   ;; Mocks `md-render--display-width' to 30 so the result is
   ;; deterministic.  Other columns stay at natural width.
-  (let ((md-render-table-max-width-fraction 1.0))
+  (let ((md-render-table-wrap-columns t)
+        (md-render-table-max-width-fraction 1.0))
     (cl-letf (((symbol-function 'md-render--display-width)
                (lambda () 30)))
       (should (equal (substring-no-properties
@@ -749,7 +750,8 @@ after" nil)))))
 (ert-deftest md-render-convert-table-output-wraps-both-cells ()
   ;; Both columns shrink and wrap when both are too wide.  Column
   ;; widths are allocated proportionally to their natural width.
-  (let ((md-render-table-max-width-fraction 1.0))
+  (let ((md-render-table-wrap-columns t)
+        (md-render-table-max-width-fraction 1.0))
     (cl-letf (((symbol-function 'md-render--display-width)
                (lambda () 30)))
       (should (equal (substring-no-properties
@@ -767,7 +769,8 @@ after" nil)))))
   ;; A whitespace-free CJK cell must still wrap: CJK characters are
   ;; individually breakable, while ASCII words (here \"Cage\", \"4\",
   ;; \"33\", \"20\") stay intact.
-  (let ((md-render-table-max-width-fraction 1.0))
+  (let ((md-render-table-wrap-columns t)
+        (md-render-table-max-width-fraction 1.0))
     (cl-letf (((symbol-function 'md-render--display-width)
                (lambda () 36)))
       (should (equal (substring-no-properties
