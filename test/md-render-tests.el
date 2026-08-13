@@ -649,7 +649,24 @@ after" nil)))))
 | **Alice** | Engineer |"))
          (alice-pos (string-match "Alice" s)))
     (should alice-pos)
-    (should (eq 'md-render-bold (get-text-property alice-pos 'face s)))))
+    ;; Rendered tables are pinned to `fixed-pitch' (so
+    ;; `variable-pitch-mode' can't skew alignment), layered under the
+    ;; cell's own faces.
+    (should (memq 'md-render-bold (get-text-property alice-pos 'face s)))
+    (should (memq 'fixed-pitch (get-text-property alice-pos 'face s)))))
+
+(ert-deftest md-render-table-pins-fixed-pitch-everywhere ()
+  ;; Borders, padding, and content all carry `fixed-pitch' so a
+  ;; default-face remap (`variable-pitch-mode') can't break alignment.
+  (let* ((s (md-render-convert "| A | B |
+|---|---|
+| 1 | 2 |"))
+         (pipe-pos (string-match "│" s))
+         (pad-pos (string-match " " s)))
+    (should pipe-pos)
+    (should pad-pos)
+    (should (memq 'fixed-pitch (get-text-property pipe-pos 'face s)))
+    (should (memq 'fixed-pitch (get-text-property pad-pos 'face s)))))
 
 (ert-deftest md-render-convert-table-skips-frozen-cell-pipe ()
   ;; `| `a|b` | c |' — inline-code body contains a `|', which our
@@ -1210,21 +1227,21 @@ A " nil)
 ![alt](/missing).
 
 " nil)
-             ("│" (md-render-table-border))
-             (" A " (md-render-table-header))
-             ("│" (md-render-table-border))
-             (" B " (md-render-table-header))
-             ("│" (md-render-table-border))
+             ("│" (fixed-pitch md-render-table-border))
+             (" A " (fixed-pitch md-render-table-header))
+             ("│" (fixed-pitch md-render-table-border))
+             (" B " (fixed-pitch md-render-table-header))
+             ("│" (fixed-pitch md-render-table-border))
              ("
-" nil)
-             ("├───┼───┤" (md-render-table-border))
+" (fixed-pitch))
+             ("├───┼───┤" (fixed-pitch md-render-table-border))
              ("
-" nil)
-             ("│" (md-render-table-border))
-             (" 1 " nil)
-             ("│" (md-render-table-border))
-             (" 2 " nil)
-             ("│" (md-render-table-border))))))
+" (fixed-pitch))
+             ("│" (fixed-pitch md-render-table-border))
+             (" 1 " (fixed-pitch))
+             ("│" (fixed-pitch md-render-table-border))
+             (" 2 " (fixed-pitch))
+             ("│" (fixed-pitch md-render-table-border))))))
 
 (ert-deftest md-render-watermark-skips-prefix-on-streamed-append ()
   ;; After a render, the prefix carries the watermark text property and

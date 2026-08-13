@@ -2075,9 +2075,14 @@ per-destination.")
 (defun md-render--table-measure-string (str window)
   "Return real pixel width of STR rendered at point-max of WINDOW's buffer.
 
+STR is pinned to `fixed-pitch' before measuring so widths stay
+font-independent — `variable-pitch-mode' remaps the buffer's
+default face, which would otherwise skew the padding math.
+
 Briefly inserts STR, measures with `window-text-pixel-size', and
 deletes; `inhibit-modification-hooks' and the modified flag are
 preserved so callers never observe the mutation."
+  (add-face-text-property 0 (length str) 'fixed-pitch nil str)
   (with-current-buffer (window-buffer window)
     (let ((inhibit-read-only t)
           (inhibit-modification-hooks t)
@@ -2088,6 +2093,11 @@ preserved so callers never observe the mutation."
         (let ((m (point-marker)))
           (set-marker-insertion-type m nil)
           (insert str)
+          ;; Mark the probe `fontified' so the display iterator doesn't
+          ;; run font-lock over it — fontifying would strip the pinned
+          ;; `fixed-pitch' face and measure in the buffer's remapped
+          ;; default face (variable-pitch).
+          (put-text-property m (point) 'fontified t)
           ;; Strip `line-prefix' / `wrap-prefix' before measuring
           (remove-text-properties m (point) '(line-prefix nil wrap-prefix nil))
           (setq real (car (window-text-pixel-size window m (point))))
@@ -2661,6 +2671,9 @@ see `md-render--render-table-source'."
   "Render TABLE by replacing [:start, :end] with the rendered :source.
 
 The rendered chars carry:
+  - a prepended `fixed-pitch' face — pinning the family keeps
+    padding, borders, and cell fonts aligned even under
+    `variable-pitch-mode' (mirrors the source view's rule).
   - `md-render-frozen t' — so subsequent passes skip them.
   - `md-render-table-source SOURCE' — the original markdown
     source, stashed so a future `md-render-replace-markup'
@@ -2688,6 +2701,11 @@ rendered region from inheriting either of our two properties."
          (rendered (md-render--render-table-source
                     :source source :window window))
          (carried (md-render--carry-properties table-start)))
+    ;; Pin the family on the output itself (see docstring): the
+    ;; default face gets remapped by `variable-pitch-mode' and the
+    ;; padding math assumes monospace, so alignment must not depend
+    ;; on which face is active when the table renders.
+    (add-face-text-property 0 (length rendered) 'fixed-pitch nil rendered)
     (delete-region table-start table-end)
     (goto-char table-start)
     (insert rendered)
@@ -3590,9 +3608,12 @@ one range covering the body \"code\"."
   "Return TEXT broken into (SUBSTRING FACES) runs.
 
 Each element is a contiguous run of characters with the same
-`face' property: SUBSTRING is the run text, FACES is a list of
-face symbols (a single symbol is wrapped, an unfaced run gets an
-empty list).  Runs are returned in left-to-right order and cover
+`face' property value: SUBSTRING is the run text, FACES is a list
+of face symbols (a single symbol is wrapped, an unfaced run gets
+an empty list).  Adjacent runs merge when their face values are
+`equal', not just `eq' — independently built but identical face
+lists (e.g. from separate `add-face-text-property' calls) count
+as one run.  Runs are returned in left-to-right order and cover
 TEXT in full.
 
 For example:
@@ -3604,8 +3625,17 @@ For example:
         (pos 0)
         (len (length text)))
     (while (< pos len)
-      (let ((face (get-text-property pos 'face text))
-            (next (or (next-single-property-change pos 'face text) len)))
+      (let* ((face (get-text-property pos 'face text))
+             (next (or (next-single-property-change pos 'face text)
+                       len)))
+        ;; `next-single-property-change' splits on `eq', but face
+        ;; lists built by separate `add-face-text-property' calls
+        ;; are `equal' without being `eq' — extend the run while
+        ;; the value stays `equal'.
+        (while (and (< next len)
+                    (equal face (get-text-property next 'face text)))
+          (setq next (or (next-single-property-change next 'face text)
+                         len)))
         (push (list (substring-no-properties text pos next)
                     (cond ((null face) nil)
                           ((listp face) face)
