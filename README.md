@@ -169,6 +169,12 @@ styled as you type.
 | M-S-Up / M-S-Down          | Delete / insert a row                       |
 | M-x md-mode-delete-table   | Delete the complete table at point          |
 
+Rows wider than the window are clipped at the window edge with dots in
+the right fringe — the source row stays on one line (Markdown requires
+it), so the rest cannot be reached by horizontal scrolling.  Switch to
+the rendered view with `C-c C-v` to see wide tables wrapped to the
+window width instead.
+
 ### Links and blocks
 
 | Key       | Action                                    |
