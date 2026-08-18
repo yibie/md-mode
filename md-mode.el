@@ -4,7 +4,7 @@
 
 ;; Author: LuciusChen
 ;; URL: https://github.com/yibie/md-mode
-;; Version: 0.2.0
+;; Version: 0.2.1
 ;; Package-Requires: ((emacs "29.1"))
 ;; Keywords: wp, convenience
 ;; SPDX-License-Identifier: GPL-3.0-or-later
@@ -188,6 +188,11 @@ not load or require `markdown-mode'."
   "C-c C-i" #'md-mode-insert-image
   "C-c C-s" md-mode-style-map
   "C-c C-v" #'md-mode-toggle-markup)
+
+(defvar-keymap md-mode--link-map
+  :doc "Keymap for opening Markdown links."
+  "RET" #'md-mode-open-at-point
+  "<mouse-1>" #'md-mode--mouse-open-at-point)
 
 (defconst md-mode--table-row-regexp
   "^[^\n]*|[^\n]*$"
@@ -1269,6 +1274,12 @@ An active region is used as the alt text."
                           (file-name-base target))))))
   (md-mode-insert-link 'image target alt))
 
+(defun md-mode--mouse-open-at-point (event)
+  "Open the Markdown link clicked by mouse EVENT."
+  (interactive "e")
+  (mouse-set-point event)
+  (md-mode-open-at-point))
+
 ;;;###autoload
 (defun md-mode-open-at-point ()
   "Open the Markdown link at point."
@@ -1689,8 +1700,12 @@ view."
     ("\\(?:^\\|[^[:alnum:]_]\\)\\(_\\)\\([^_\n]+\\)\\(_\\)"
      (1 'md-mode-markup) (2 'md-render-italic)
      (3 'md-mode-markup))
-    ("!?\\[\\([^]\n]+\\)\\](\\([^) \n]+\\))"
-     (1 'md-render-link) (2 'md-mode-markup))
+    (,md-mode--link-regexp
+     (2 (list 'face 'md-render-link
+              'keymap md-mode--link-map
+              'mouse-face 'highlight))
+     (3 'md-mode-markup nil t)
+     (4 'md-mode-markup nil t))
     ("^[ \t]*>+[ \t]+\\(.+\\)$"
      (1 'md-render-blockquote))
     (md-mode--match-table-header
@@ -2287,7 +2302,8 @@ view."
   (setq-local md-mode--rendered-p nil)
   (setq-local font-lock-defaults '(md-mode--font-lock-keywords))
   (setq-local font-lock-extra-managed-props
-              (cons 'display font-lock-extra-managed-props))
+              (append '(keymap mouse-face display)
+                      font-lock-extra-managed-props))
   (setq-local font-lock-syntactic-face-function #'md-mode--syntactic-face)
   (setq-local syntax-propertize-function #'md-mode--syntax-propertize)
   (setq-local outline-search-function #'md-mode--outline-search)

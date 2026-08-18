@@ -717,6 +717,33 @@
                     "![Chart](images/chart.png)\n"
                     "[User guide](<docs/user guide.md>)")))))
 
+(ert-deftest md-mode-edit-links-are-clickable ()
+  (with-temp-buffer
+    (insert "[web](https://example.com) [file](<docs/user guide.md>)")
+    (md-mode)
+    (font-lock-ensure)
+    (dolist (label '("web" "file"))
+      (goto-char (point-min))
+      (search-forward label)
+      (let ((map (get-text-property (1- (point)) 'keymap)))
+        (should (keymapp map))
+        (should (eq (lookup-key map [mouse-1])
+                    #'md-mode--mouse-open-at-point))
+        (should (eq (lookup-key map (kbd "RET"))
+                    #'md-mode-open-at-point))
+        (should (eq (get-text-property (1- (point)) 'mouse-face)
+                    'highlight))))
+    (let (opened)
+      (cl-letf (((symbol-function 'mouse-set-point) (lambda (_event) nil))
+                ((symbol-function 'find-file)
+                 (lambda (file) (setq opened file))))
+        (goto-char (point-min))
+        (search-forward "file")
+        (md-mode--mouse-open-at-point nil))
+      (should (equal opened
+                     (expand-file-name "docs/user guide.md"
+                                       default-directory))))))
+
 (ert-deftest md-mode-edits-and-opens-links-at-point ()
   (with-temp-buffer
     (insert "[Docs](guide.md)")
