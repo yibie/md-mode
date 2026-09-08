@@ -1,8 +1,8 @@
 ;;; md-mode.el --- Edit and render Markdown buffers -*- lexical-binding: t; -*-
 
-;; Copyright (C) 2026 LuciusChen
+;; Copyright (C) 2026 yibie
 
-;; Author: LuciusChen <https://github.com/yibie>
+;; Author: yibie <https://github.com/yibie>
 ;; Assisted-by: Codex:gpt-5.5
 ;; URL: https://github.com/yibie/md-mode
 ;; Version: 0.4.1
