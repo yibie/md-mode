@@ -496,9 +496,10 @@ For example:
     (buffer-string)))
 
 (cl-defun md-render-replace-markup (&key force
-                                                    (render-images t)
-                                                    (highlight-blocks t)
-                                                    image-cache-directory)
+                                       (render-images t)
+                                       (highlight-blocks t)
+                                       image-cache-directory
+                                       defer-tables)
   "Replace Markdown markup in current buffer with propertized text.
 
 Rewrites the buffer in place: markup characters are removed and
@@ -541,7 +542,11 @@ left as text.  HIGHLIGHT-BLOCKS, when non-nil by default, runs the
 fenced-block body through the language's
 major-mode font-lock to colour keywords / strings / etc.; nil
 strips the fences and inserts the action label but leaves the
-body un-fontified."
+body un-fontified.
+
+When DEFER-TABLES is non-nil, preserve styled table source and its
+reconstruction properties for subsequent widget layout, without
+measuring or formatting the table twice."
   (save-excursion
     (when force
       (with-silent-modifications
@@ -626,7 +631,8 @@ body un-fontified."
         ;; `--update-watermark'), so `--find-tables' under the narrow
         ;; always sees the existing `md-render-table-source'
         ;; needed to fold new rows in.
-        (md-render--style-tables :avoid-ranges source-ranges)
+        (md-render--style-tables :avoid-ranges source-ranges
+                                 :defer defer-tables)
         ;; Keep the structural facts needed by the display layout adapter
         ;; separate from the faces produced by the styling passes.
         (md-render--annotate-line-context :avoid-ranges avoid-ranges)
@@ -2494,32 +2500,33 @@ STR is pinned to `fixed-pitch' before measuring so widths stay
 font-independent — `variable-pitch-mode' remaps the buffer's
 default face, which would otherwise skew the padding math.
 
-Briefly inserts STR, measures with `window-text-pixel-size', and
-deletes; `inhibit-modification-hooks' and the modified flag are
-preserved so callers never observe the mutation."
-  (add-face-text-property 0 (length str) 'fixed-pitch nil str)
-  (with-current-buffer (window-buffer window)
-    (let ((inhibit-read-only t)
-          (inhibit-modification-hooks t)
-          (modified (buffer-modified-p)))
-      (save-excursion
-        (goto-char (point-max))
-        (let ((beg (point)) end)
-          (unwind-protect
-              (progn
-                (insert str)
-                (setq end (point))
-                ;; Keep font-lock from stripping the pinned fixed-pitch face.
-                (put-text-property beg end 'fontified t)
-                (remove-text-properties beg end
-                                        '(line-prefix nil wrap-prefix nil))
-                ;; Do not clip measurements to the window width.
-                (car (window-text-pixel-size
-                      window beg end md-render--table-measure-x-limit)))
-            ;; Redisplay may move point; clean up only the inserted probe,
-            ;; including when measurement signals an error.
-            (when end (delete-region beg end))
-            (set-buffer-modified-p modified)))))))
+Briefly inserts STR in an isolated region, measures with
+`window-text-pixel-size', and deletes the probe even on error.
+STR, buffer contents, undo history and the modified flag are preserved."
+  (if (string-empty-p str)
+      0
+    (with-current-buffer (window-buffer window)
+      (let ((inhibit-read-only t))
+        (with-silent-modifications
+          (save-excursion
+            (save-restriction
+              (goto-char (point-max))
+              ;; Keep display initialization from traversing the preceding
+              ;; line or paragraph for every cell and wrapping probe.
+              (narrow-to-region (point) (point))
+              (unwind-protect
+                  (progn
+                    (insert str)
+                    ;; Style the copy, keeping STR and its cache key stable.
+                    (add-face-text-property
+                     (point-min) (point-max) 'fixed-pitch nil)
+                    (put-text-property (point-min) (point-max) 'fontified t)
+                    (remove-text-properties
+                     (point-min) (point-max) '(line-prefix nil wrap-prefix nil))
+                    (car (window-text-pixel-size
+                          window (point-min) (point-max)
+                          md-render--table-measure-x-limit)))
+                (delete-region (point-min) (point-max))))))))))
 
 (defun md-render--table-char-pixel-width (window)
   "Return real pixel width of a single space in WINDOW, cached.
@@ -3163,7 +3170,7 @@ see `md-render--render-table-source'."
             (setq col (1+ col))))))
     min-widths))
 
-(defun md-render--render-table (table)
+(defun md-render--render-table (table &optional defer)
   "Render TABLE by replacing [:start, :end] with the rendered :source.
 
 The rendered chars carry:
@@ -3186,7 +3193,9 @@ delete+insert would drop them and break callers that look up
 regions by text property.
 
 `rear-nonsticky' prevents new chars inserted just after the
-rendered region from inheriting either of our two properties."
+rendered region from inheriting either of our two properties.
+When DEFER is non-nil, tag a copy of the source for later widget
+layout instead of measuring and formatting an intermediate table."
   (let* ((source (map-elt table :source))
          (table-start (map-elt table :start))
          (table-end (map-elt table :end))
@@ -3199,8 +3208,10 @@ rendered region from inheriting either of our two properties."
          ;; forwards it through to width / padding measurement.
          (window (or (get-buffer-window (current-buffer))
                      (selected-window)))
-         (rendered (md-render--render-table-source
-                    :source source :window window))
+         (rendered (if defer
+                       (copy-sequence source)
+                     (md-render--render-table-source
+                      :source source :window window)))
          (carried (md-render--carry-properties table-start)))
     ;; Pin the family on the output itself (see docstring): the
     ;; default face gets remapped by `variable-pitch-mode' and the
@@ -3529,12 +3540,12 @@ BOUNDARY-PIXELS is the uniform advance of every vertical border."
 
 Two claims are capped: the minimum a column demands for its
 longest unbreakable token, and the natural width that weights the
-share of the flexible space.  Without the cap a single huge cell
-(one 1200-character paragraph) takes nearly the whole table and
+share of the flexible space.  Without the cap a single huge cell,
+such as a 1200-character paragraph, takes nearly the whole table and
 starves the short columns down to one character per line.")
 
 (defun md-render--table-widget-longest-token-pixels (text window)
-  "Return the pixel width of the widest unbreakable token in TEXT.
+  "Return the pixel width of the widest unbreakable token in TEXT in WINDOW.
 Tokens end at whitespace and after any character the wrapper may
 break after (see `md-render--table-break-after-p'), so the result
 is the narrowest width at which `md-render--table-widget-wrap-pixels'
@@ -3826,7 +3837,7 @@ Each row is an alist with :start, :end, :num, :separator."
       (setq idx (1+ idx)))
     result))
 
-(cl-defun md-render--style-tables (&key avoid-ranges)
+(cl-defun md-render--style-tables (&key avoid-ranges defer)
   "Render markdown tables found in current buffer.
 
 Each detected table has its source rows deleted from the buffer
@@ -3843,13 +3854,14 @@ blocks whose closing fence hasn't streamed in yet).
 Honours `md-render-prettify-tables'.  Cell content is taken
 directly from the buffer (with text properties preserved from
 the earlier inline passes), so bold/italic/inline-code/link
-rendering inside cells is provided for free."
+rendering inside cells is provided for free.
+When DEFER is non-nil, preserve styled source for later widget layout."
   (when md-render-prettify-tables
     ;; Process tables in reverse so earlier positions stay valid as
     ;; each replacement shifts everything after it.
     (dolist (table (nreverse (md-render--find-tables
                               :avoid-ranges avoid-ranges)))
-      (md-render--render-table table))))
+      (md-render--render-table table defer))))
 
 (defun md-render-table-next-cell ()
   "Move point to the start of the next table cell.

@@ -65,6 +65,10 @@
 (defvar-local md-mode--table-relayout-timer nil
   "Idle timer pending a table widget relayout, or nil.")
 
+(defvar-local md-mode--table-bounds-cache nil
+  "Cached table bounds as (CHAR-TICK MIN MAX . BOUNDS).
+CHAR-TICK and the accessible MIN and MAX positions determine validity.")
+
 (defcustom md-mode-auto-align-tables nil
   "When non-nil, align Markdown tables when entering `md-mode'."
   :type 'boolean
@@ -1531,6 +1535,22 @@ When the region is active, use its lines as the callout body."
 
 (defun md-mode--table-bounds ()
   "Return (BEGIN END COLUMNS) for the Markdown table at point."
+  (pcase-let* ((tick (buffer-chars-modified-tick))
+               (`(,cached-tick ,beg ,end . ,bounds) md-mode--table-bounds-cache))
+    (if (and bounds
+             (eql tick cached-tick)
+             (eql beg (point-min))
+             (eql end (point-max))
+             (<= (car bounds) (point))
+             (< (point) (cadr bounds)))
+        (copy-sequence bounds)
+      (let ((bounds (md-mode--scan-table-bounds)))
+        (setq md-mode--table-bounds-cache
+              (cl-list* tick (point-min) (point-max) (copy-sequence bounds)))
+        bounds))))
+
+(defun md-mode--scan-table-bounds ()
+  "Scan for (BEGIN END COLUMNS) of the Markdown table at point."
   (save-excursion
     (beginning-of-line)
     (let ((origin (point))
@@ -2506,7 +2526,7 @@ When FORCE is non-nil, relayout even when the character width is unchanged."
         ;; at their start, near the original reading position.
         (save-excursion
           (with-silent-modifications
-            (md-render-replace-markup :force t)
+            (md-render-replace-markup :force t :defer-tables t)
             (md-mode--attach-table-widgets))))
       (md-mode--set-rendered-p t)
       (md-mode--scale-heading-fallback-font)

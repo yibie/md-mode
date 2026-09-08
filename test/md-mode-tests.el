@@ -2188,6 +2188,78 @@ buffer?\" conflict (a hard error in batch)."
     (should (equal (buffer-string) md-mode-tests--source))
     (should-not buffer-read-only)))
 
+(ert-deftest md-mode-render-lays-out-each-table-once ()
+  (with-temp-buffer
+    (let ((source (concat "| A | B |\n| --- | --- |\n| one | two |\n\n"
+                          "| C | D |\n| --- | --- |\n| three | four |\n"))
+          (render (symbol-function 'md-render--render-table-source))
+          (layouts 0))
+      (insert source)
+      (md-mode)
+      ;; In a terminal, both the standalone renderer and the widget use
+      ;; this layout function.  Count real layouts, preserving their output.
+      (cl-letf (((symbol-function 'display-graphic-p) (lambda (&optional _) nil))
+                ((symbol-function 'md-render--render-table-source)
+                 (lambda (&rest args)
+                   (setq layouts (1+ layouts))
+                   (apply render args))))
+        (md-mode-render))
+      (should (= (length md-mode--table-widgets) 2))
+      (should (= layouts 2))
+      (md-mode-show-source)
+      (should (equal (buffer-string) source)))))
+
+(ert-deftest md-mode-render-keeps-inline-table-styles ()
+  (with-temp-buffer
+    (insert "| A | B |\n| --- | --- |\n"
+            "| **one** | [two](https://example.com) |\n")
+    (md-mode)
+    (md-mode-render)
+    (should (md-mode-tests--has-face-p "one" 'md-render-bold))
+    (goto-char (point-min))
+    (search-forward "two")
+    (should (equal (get-text-property (1- (point)) 'md-render-url)
+                   "https://example.com"))))
+
+(ert-deftest md-mode-table-bounds-scan-is-linear ()
+  (with-temp-buffer
+    (insert "| A | B |\n| --- | --- |\n")
+    (dotimes (_ 100)
+      (insert "| one | two |\n"))
+    (md-mode)
+    (goto-char (point-min))
+    (let ((parse (symbol-function 'md-mode--table-row-cells))
+          (calls 0))
+      (cl-letf (((symbol-function 'md-mode--table-row-cells)
+                 (lambda ()
+                   (setq calls (1+ calls))
+                   (funcall parse))))
+        (while (not (eobp))
+          (should (equal (md-mode--table-bounds)
+                         (list (point-min) (point-max) 2)))
+          (forward-line 1)))
+      (should (< calls 500)))))
+
+(ert-deftest md-mode-table-bounds-cache-tracks-edits-and-restrictions ()
+  (with-temp-buffer
+    (insert "| A | B |\n| --- | --- |\n| one | two |\n")
+    (md-mode)
+    (goto-char (point-min))
+    (let ((bounds (md-mode--table-bounds)))
+      ;; Changing a returned list must not alter the cached result.
+      (setcar bounds -1)
+      (should (= (car (md-mode--table-bounds)) (point-min))))
+    (forward-line 2)
+    (save-restriction
+      (narrow-to-region (point) (point-max))
+      (should-not (md-mode--table-bounds)))
+    (should (md-mode--table-bounds))
+    (forward-line -1)
+    ;; Keep the size unchanged so that only the character tick invalidates.
+    (delete-region (point) (line-end-position))
+    (insert "| abc | def |")
+    (should-not (md-mode--table-bounds))))
+
 (provide 'md-mode-tests)
 
 ;;; md-mode-tests.el ends here

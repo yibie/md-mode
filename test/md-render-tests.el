@@ -2799,6 +2799,55 @@ for a fully-selected buffer."
           (should (= 2 (hash-table-count
                         (cdr md-render--table-widget-measure-cache)))))))))
 
+(ert-deftest md-render-table-measurement-preserves-input-and-buffer ()
+  (save-window-excursion
+    (with-temp-buffer
+      (switch-to-buffer (current-buffer))
+      (insert "Text before the probe, without a final newline")
+      (buffer-enable-undo)
+      (set-buffer-modified-p nil)
+      (goto-char (point-min))
+      (let* ((input (propertize "中文" 'face 'bold))
+             (original (copy-sequence input))
+             (contents (buffer-string))
+             (undo buffer-undo-list)
+             (position (point)))
+        (cl-letf (((symbol-function 'window-text-pixel-size)
+                   (lambda (_window from to &rest _)
+                     ;; The display iterator must only see the probe.
+                     (should (= from (point-min)))
+                     (should (= to (point-max)))
+                     (should (equal (buffer-string) input))
+                     '(20 . 10))))
+          (dotimes (_ 2)
+            (should (= 20 (md-render--table-measure-string
+                           input (selected-window)))))
+          (should (equal-including-properties input original))
+          (should (equal-including-properties (buffer-string) contents))
+          (should (= (point) position))
+          (should (eq buffer-undo-list undo))
+          (should-not (buffer-modified-p)))))))
+
+(ert-deftest md-render-table-measurement-cleans-up-after-error ()
+  (save-window-excursion
+    (with-temp-buffer
+      (switch-to-buffer (current-buffer))
+      (insert "Original contents")
+      (buffer-enable-undo)
+      (set-buffer-modified-p nil)
+      (let ((contents (buffer-string))
+            (undo buffer-undo-list)
+            (position (point)))
+        (cl-letf (((symbol-function 'window-text-pixel-size)
+                   (lambda (&rest _) (error "Measurement failed"))))
+          (should-error
+           (md-render--table-measure-string "probe" (selected-window))))
+        (should (equal-including-properties (buffer-string) contents))
+        (should (= (point) position))
+        (should (eq buffer-undo-list undo))
+        (should-not (buffer-narrowed-p))
+        (should-not (buffer-modified-p))))))
+
 (provide 'md-render-tests)
 
 ;;; md-render-tests.el ends here
