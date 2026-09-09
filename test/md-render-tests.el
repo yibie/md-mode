@@ -2778,6 +2778,7 @@ for a fully-selected buffer."
             (plain (copy-sequence "text"))
             (styled (propertize "text" 'face 'bold)))
         (cl-letf (((symbol-function 'display-graphic-p) (lambda (&rest _) t))
+                  ((symbol-function 'window-font-width) (lambda (&rest _) 10))
                   ((symbol-function 'md-render--table-measure-string)
                    (lambda (string _window)
                      (cl-incf calls)
@@ -2886,6 +2887,53 @@ for a fully-selected buffer."
     (search-forward "Title")
     (should (eq (get-text-property (1- (point)) 'face)
                 'md-render-header-2))))
+
+(ert-deftest md-render-measurement-cache-propagates-font-errors ()
+  (dolist (function '(window-font-width face-font))
+    (with-temp-buffer
+      (save-window-excursion
+        (switch-to-buffer (current-buffer))
+        (cl-letf (((symbol-function function)
+                   (lambda (&rest _) (error "Font lookup failed"))))
+          (should-error
+           (md-render--table-widget-measurements
+            (selected-window) #'ignore)
+           :type 'error)
+          (should-not md-render--table-widget-measure-cache))))))
+
+(ert-deftest md-render-measurement-cache-accepts-unspecified-font ()
+  (with-temp-buffer
+    (save-window-excursion
+      (switch-to-buffer (current-buffer))
+      (cl-letf (((symbol-function 'window-font-width) (lambda (&rest _) 10))
+                ((symbol-function 'face-font) (lambda (&rest _) nil)))
+        (let ((cache (md-render--table-widget-measurements
+                      (selected-window) #'ignore)))
+          (should (hash-table-p cache))
+          (should (eq cache (md-render--table-widget-measurements
+                             (selected-window) #'ignore))))))))
+
+(ert-deftest md-render-measurement-cache-invalidates-on-font-change ()
+  (with-temp-buffer
+    (save-window-excursion
+      (switch-to-buffer (current-buffer))
+      (let ((width 8)
+            (font "first"))
+        (cl-letf (((symbol-function 'window-font-width)
+                   (lambda (&rest _) width))
+                  ((symbol-function 'face-font)
+                   (lambda (&rest _) font)))
+          (let ((cache (md-render--table-widget-measurements
+                        (selected-window) #'ignore)))
+            (should (eq cache (md-render--table-widget-measurements
+                               (selected-window) #'ignore)))
+            (setq width 10)
+            (should-not (eq cache (md-render--table-widget-measurements
+                                   (selected-window) #'ignore)))
+            (setq cache (cdr md-render--table-widget-measure-cache)
+                  font "second")
+            (should-not (eq cache (md-render--table-widget-measurements
+                                   (selected-window) #'ignore)))))))))
 
 (provide 'md-render-tests)
 

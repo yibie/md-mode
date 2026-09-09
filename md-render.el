@@ -276,10 +276,11 @@ measures the tables.")
 A string's pixel width depends only on the fonts, not on the
 window width, so measurements survive relayouts; the table is
 dropped when the window font, the `fixed-pitch' font, or the
-measuring function changes."
+measuring function changes.  WINDOW must be live; the layout caller
+checks this before requesting measurements."
   (with-current-buffer (window-buffer window)
-    (let ((validity (list (ignore-errors (window-font-width window))
-                          (ignore-errors (face-font 'fixed-pitch))
+    (let ((validity (list (window-font-width window)
+                          (face-font 'fixed-pitch)
                           measure)))
       (unless (and md-render--table-widget-measure-cache
                    (equal (car md-render--table-widget-measure-cache)
