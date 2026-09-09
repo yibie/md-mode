@@ -562,7 +562,11 @@ measuring or formatting the table twice."
           (inline-ranges)
           (avoid-ranges))
       (save-restriction
-        (narrow-to-region watermark (point-max))
+        ;; Metadata is not Markdown; exclude it from every rendering pass.
+        (narrow-to-region
+         (min (point-max)
+              (max watermark (or (md-render-front-matter-end) watermark)))
+         (point-max))
         (with-silent-modifications
           (md-render--clear-wrap-prefixes)
           (md-render--clear-line-context))
@@ -677,6 +681,22 @@ sorted — the form the avoid-range machinery
              (cons (map-nested-elt source-block '(:block :start))
                    (map-nested-elt source-block '(:block :end))))
            source-blocks)))
+
+(defun md-render-front-matter-end ()
+  "Return the end of complete YAML front matter, or nil.
+Recognize an opening `---' at the absolute buffer start and a closing
+`---' or `...' line.  Include both delimiters and the closing newline.
+Preserve point, narrowing, and match data."
+  (save-match-data
+    (save-restriction
+      (widen)
+      (save-excursion
+        (goto-char (point-min))
+        (when (looking-at "---[ \t]*$")
+          (forward-line 1)
+          (when (re-search-forward "^\\(?:---\\|\\.\\.\\.\\)[ \t]*$" nil t)
+            (forward-line 1)
+            (point)))))))
 
 (defun md-render-context ()
   "Return the render context for the current narrowed region.

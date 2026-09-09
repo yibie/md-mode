@@ -1780,8 +1780,46 @@ Applies to both the edit and the rendered view."
   (when (nth 4 state)
     'md-render-source-block))
 
+(defun md-mode--match-setext-heading (limit)
+  "Find a Setext heading before LIMIT outside metadata and fenced code."
+  (let ((front-matter-end (md-render-front-matter-end))
+        found)
+    (while (and (not found)
+                (re-search-forward
+                 (rx bol (group (one-or-more not-newline)) "\n"
+                     (zero-or-more blank)
+                     (group (or (one-or-more "=") (one-or-more "-")))
+                     (zero-or-more blank) eol)
+                 limit t))
+      (let ((start (match-beginning 1))
+            (title (match-string-no-properties 1)))
+        (unless (or (and front-matter-end (< start front-matter-end))
+                    (md-mode--inside-fenced-block-p start)
+                    (save-match-data
+                      (string-match-p
+                       (rx string-start (zero-or-more blank)
+                           (or string-end
+                               (seq (one-or-more "#")
+                                    (or blank string-end))))
+                       title)))
+          (setq found t))))
+    found))
+
+(defun md-mode--extend-heading-change (begin end _old-length)
+  "Extend a change from BEGIN to END to adjacent heading lines.
+Ignore _OLD-LENGTH, the length of the replaced text."
+  (save-match-data
+    (save-excursion
+      (cons (progn (goto-char begin) (line-beginning-position 0))
+            (progn (goto-char end) (line-beginning-position 3))))))
+
 (defconst md-mode--font-lock-keywords
-  `(("^[ \t]*```.*$" (0 'md-render-source-block-language t))
+  `((md-mode--match-setext-heading
+     (1 (if (eq (char-after (match-beginning 2)) ?=)
+            'md-render-header-1
+          'md-render-header-2))
+     (2 'md-mode-markup))
+    ("^[ \t]*```.*$" (0 'md-render-source-block-language t))
     ("^[ \t]*>[ \t]+\\(\\[!\\(?:NOTE\\|TIP\\|IMPORTANT\\|WARNING\\|CAUTION\\)\\]\\)"
      (1 'md-mode-callout prepend))
     ("^\\(######\\)[ \t]+\\(.+\\)$"
@@ -2609,6 +2647,8 @@ Reset the pending state on every save, including retries after a failure."
   "Major mode for editing and rendering Markdown source."
   (setq-local md-mode--rendered-p nil)
   (setq-local font-lock-defaults '(md-mode--font-lock-keywords))
+  (setq-local font-lock-extend-after-change-region-function
+              #'md-mode--extend-heading-change)
   (setq-local font-lock-extra-managed-props
               (append '(keymap mouse-face display)
                       font-lock-extra-managed-props))

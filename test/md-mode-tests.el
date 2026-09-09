@@ -2260,6 +2260,68 @@ buffer?\" conflict (a hard error in batch)."
     (insert "| abc | def |")
     (should-not (md-mode--table-bounds))))
 
+
+(ert-deftest md-mode-setext-source-faces ()
+  (with-temp-buffer
+    (insert "First\n===\n\nSecond\n---\n")
+    (md-mode)
+    (font-lock-ensure)
+    (should (md-mode-tests--has-face-p "First" 'md-render-header-1))
+    (should (md-mode-tests--has-face-p "Second" 'md-render-header-2))))
+
+(ert-deftest md-mode-setext-skips-front-matter-and-code ()
+  (with-temp-buffer
+    (insert "---\nupdated: date\n---\n\n```\nCode\n===\n```\n")
+    (md-mode)
+    (font-lock-ensure)
+    (should-not (md-mode-tests--has-face-p "updated" 'md-render-header-2))
+    (should-not (md-mode-tests--has-face-p "Code" 'md-render-header-1))))
+
+(ert-deftest md-mode-setext-refontifies-after-underline-edit ()
+  (with-temp-buffer
+    (insert "Title\n===\n")
+    (md-mode)
+    (font-lock-ensure)
+    (goto-char (point-min))
+    (forward-line 1)
+    (let ((start (point)))
+      (delete-region start (line-end-position))
+      (insert "---")
+      (pcase-let ((`(,begin . ,end)
+                   (funcall font-lock-extend-after-change-region-function
+                            start (point) 3)))
+        (font-lock-flush begin end)
+        (font-lock-ensure begin end)))
+    (should (md-mode-tests--has-face-p "Title" 'md-render-header-2))
+    (goto-char (point-min))
+    (forward-line 1)
+    (delete-region (point) (line-end-position))
+    (pcase-let ((`(,begin . ,end)
+                 (funcall font-lock-extend-after-change-region-function
+                          (point) (point) 3)))
+      (font-lock-flush begin end)
+      (font-lock-ensure begin end))
+    (should-not (md-mode-tests--has-face-p "Title" 'md-render-header-2))))
+
+(ert-deftest md-mode-issue-11-roundtrip ()
+  (let ((source (concat "---\ncreated: 2026-09-04\nupdated: 2026-09-07\n---\n"
+                        "\n# Heading level 1\n\n## Heading level 2\n"
+                        "\nSetext heading level 1\n===\n"
+                        "\nSetext heading level 2\n---\n")))
+    (with-temp-buffer
+      (insert source)
+      (md-mode)
+      (font-lock-ensure)
+      (md-mode-render)
+      (should-not (md-mode-tests--has-face-p
+                   "updated:" 'md-render-header-2))
+      (should (md-mode-tests--has-face-p
+               "Setext heading level 1" 'md-render-header-1))
+      (should (md-mode-tests--has-face-p
+               "Setext heading level 2" 'md-render-header-2))
+      (md-mode-show-source)
+      (should (equal (buffer-string) source)))))
+
 (provide 'md-mode-tests)
 
 ;;; md-mode-tests.el ends here

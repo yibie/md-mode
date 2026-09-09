@@ -2848,6 +2848,45 @@ for a fully-selected buffer."
         (should-not (buffer-narrowed-p))
         (should-not (buffer-modified-p))))))
 
+(ert-deftest md-render-front-matter-remains-literal ()
+  (dolist (closing '("---" "..."))
+    (let* ((yaml (concat "---\ncreated: **literal**\nupdated: date\n"
+                         closing "\n"))
+           (source (concat yaml "\nTitle\n===\n")))
+      (with-temp-buffer
+        (insert source)
+        (md-render-replace-markup :force t :render-images nil)
+        (should (equal (buffer-substring-no-properties
+                        (point-min) (+ (point-min) (length yaml)))
+                       yaml))
+        (dotimes (offset (length yaml))
+          (should-not (get-text-property (1+ offset) 'face))
+          (should-not (get-text-property (1+ offset) 'display)))
+        (goto-char (point-min))
+        (search-forward "Title")
+        (should (eq (get-text-property (1- (point)) 'face)
+                    'md-render-header-1))
+        (should (equal (md-render-reconstruct (point-min) (point-max))
+                       source))))))
+
+(ert-deftest md-render-front-matter-repeat-and-end-of-buffer ()
+  (with-temp-buffer
+    (insert "---\nupdated: date\n---")
+    (dotimes (_ 2)
+      (md-render-replace-markup :force t :render-images nil)
+      (should (equal (buffer-string) "---\nupdated: date\n---"))
+      (should-not (get-text-property (point-min) 'display)))))
+
+(ert-deftest md-render-front-matter-requires-buffer-start ()
+  (with-temp-buffer
+    (insert "Intro\n\n---\nTitle\n---\n")
+    (should-not (md-render-front-matter-end))
+    (md-render-replace-markup :force t :render-images nil)
+    (goto-char (point-min))
+    (search-forward "Title")
+    (should (eq (get-text-property (1- (point)) 'face)
+                'md-render-header-2))))
+
 (provide 'md-render-tests)
 
 ;;; md-render-tests.el ends here
