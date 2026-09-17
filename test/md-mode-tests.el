@@ -1954,12 +1954,52 @@ character per line."
     (md-mode)
     (md-mode-render)
     (font-lock-ensure)
-    (should (md-mode-tests--has-face-p "Title"
-                                      'md-render-header-1))
+    ;; With Font Lock disabled, only `face' affects the display.
+    (should (eq (md-mode-tests--face-at "Title") 'md-render-header-1))
     (md-mode-show-source)
     (font-lock-ensure)
     (should (md-mode-tests--has-face-p "Title"
                                       'md-render-header-1))))
+
+(ert-deftest md-mode-rendered-properties-survive-font-lock-refresh ()
+  (dolist (fontify-first '(nil t))
+    (with-temp-buffer
+      ;; Font Lock does not activate in buffers whose names start with a space.
+      (rename-buffer (generate-new-buffer-name "md-mode-font-lock-test"))
+      (let ((noninteractive nil)
+            (source (concat "# Title\n\n**bold** and [link](https://example.com).\n\n"
+                            "> [!TIP]\n> Body\n\n"
+                            "| A | B |\n| --- | --- |\n| **cell** | value |\n")))
+        (insert source)
+        (md-mode)
+        (when fontify-first
+          (font-lock-mode 1)
+          (font-lock-ensure))
+        (set-buffer-modified-p nil)
+        (md-mode-render)
+        (let ((rendered (buffer-string)))
+          (dolist (refresh (list #'font-lock-ensure
+                                (lambda () (font-lock-mode 1))
+                                #'font-lock-flush
+                                #'font-lock-refresh-defaults
+                                (lambda () (font-lock-mode -1))))
+            (funcall refresh)
+            (font-lock-ensure)
+            (should md-mode--rendered-p)
+            (should buffer-read-only)
+            (should-not (buffer-modified-p))
+            (should (equal (buffer-substring-no-properties
+                            (point-min) (point-max))
+                           (substring-no-properties rendered)))
+            (dotimes (index (length rendered))
+              (dolist (property '(face font-lock-face display keymap mouse-face))
+                (should (equal (get-text-property (1+ index) property)
+                               (get-text-property index property rendered)))))))
+        (md-mode-show-source)
+        (font-lock-mode 1)
+        (font-lock-ensure)
+        (should (equal (buffer-string) source))
+        (should (eq (md-mode-tests--face-at "Title") 'md-render-header-1))))))
 
 (ert-deftest md-mode-render-transitions-do-not-run-edit-hooks ()
   (with-temp-buffer
@@ -1974,6 +2014,38 @@ character per line."
       (should (= changes 0))
       (md-mode-show-source)
       (should (= changes 0)))))
+
+(ert-deftest md-mode-tail-tables-survive-contextual-fontification ()
+  (with-temp-buffer
+    (rename-buffer (generate-new-buffer-name "md-mode-tail-tables-test"))
+    (dotimes (index 8)
+      (insert (format "# Section %d\n\n" index)
+              "| Name | Value |\n| --- | --- |\n| **bold** | `code` |\n\n"))
+    (let ((noninteractive nil))
+      (md-mode)
+      (font-lock-mode 1))
+    (font-lock-ensure)
+    (set-buffer-modified-p nil)
+    (let ((source (buffer-string))
+          (source-end (point-max)))
+      (should (= jit-lock-context-unfontify-pos source-end))
+      (dotimes (pass 2)
+        (md-mode-render)
+        (should (= (length md-mode--table-widgets) 8))
+        (when (zerop pass)
+          ;; Rendering expands the tables beyond the old source boundary.
+          ;; The pending idle pass then invalidates only the document tail.
+          (should (< source-end (point-max)))
+          (should (= jit-lock-context-unfontify-pos source-end)))
+        (let ((rendered (buffer-string)))
+          (jit-lock-context-fontify)
+          (jit-lock-fontify-now (point-min) (point-max))
+          (should (equal-including-properties (buffer-string) rendered)))
+        (should md-mode--rendered-p)
+        (should buffer-read-only)
+        (should-not (buffer-modified-p))
+        (md-mode-show-source)
+        (should (equal (buffer-string) source))))))
 
 (ert-deftest md-mode-mermaid-renders-image-and-restores-code ()
   (with-temp-buffer
@@ -2038,6 +2110,11 @@ character per line."
                 (should-not (get-text-property position 'display))
                 (write-region "" nil file nil 'silent)
                 (funcall sentinel 'fake-process "finished\n")
+                ;; Late fontification must not disturb an image delivered
+                ;; after the initial rendering pass.
+                (font-lock-ensure)
+                (font-lock-fontify-region (point-min) (point-max))
+                (font-lock-unfontify-region (point-min) (point-max))
                 (should (equal (get-text-property position 'display)
                                '(image :type png :fake t))))
               (md-mode-show-source)

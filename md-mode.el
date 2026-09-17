@@ -1864,6 +1864,20 @@ Ignore _OLD-LENGTH, the length of the replaced text."
      (0 'fixed-pitch prepend)))
   "Font-lock rules for editable Markdown source.")
 
+(defun md-mode--fontify-region (begin end &optional loudly)
+  "Fontify editable source between BEGIN and END.
+Pass LOUDLY to the standard fontifier for progress messages.
+Leave rendered text alone: its styling and display properties belong to
+the renderer, and source fontification cannot reconstruct them."
+  (unless md-mode--rendered-p
+    (font-lock-default-fontify-region begin end loudly)))
+
+(defun md-mode--unfontify-region (begin end)
+  "Clear source fontification between BEGIN and END.
+Preserve rendered properties when Font Lock is disabled or restarted."
+  (unless md-mode--rendered-p
+    (font-lock-default-unfontify-region begin end)))
+
 (defun md-mode--ensure-mode ()
   "Signal a user error unless the current buffer uses `md-mode'."
   (unless (derived-mode-p 'md-mode)
@@ -2646,7 +2660,10 @@ Reset the pending state on every save, including retries after a failure."
 (define-derived-mode md-mode text-mode "MD"
   "Major mode for editing and rendering Markdown source."
   (setq-local md-mode--rendered-p nil)
-  (setq-local font-lock-defaults '(md-mode--font-lock-keywords))
+  (setq-local font-lock-defaults
+              '(md-mode--font-lock-keywords nil nil nil
+                (font-lock-fontify-region-function . md-mode--fontify-region)
+                (font-lock-unfontify-region-function . md-mode--unfontify-region)))
   (setq-local font-lock-extend-after-change-region-function
               #'md-mode--extend-heading-change)
   (setq-local font-lock-extra-managed-props
