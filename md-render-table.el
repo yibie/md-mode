@@ -660,11 +660,13 @@ below the table."
 (defun md-render--table-measure-string (string window)
   "Return the pixel width of STRING drawn in WINDOW's buffer.
 The string is measured in the `fixed-pitch' face that rendered tables
-use.  The buffer, point and undo history are left untouched."
+use.  Disable line-number display only while measuring.
+The buffer, point and undo history are left untouched."
   (if (string-empty-p string)
       0
     (with-current-buffer (window-buffer window)
-      (let ((probe (copy-sequence string)))
+      (let ((probe (copy-sequence string))
+            (display-line-numbers nil))
         (add-face-text-property 0 (length probe) 'fixed-pitch nil probe)
         (put-text-property 0 (length probe) 'fontified t probe)
         (remove-text-properties 0 (length probe)

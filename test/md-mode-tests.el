@@ -1452,6 +1452,75 @@
       (should-not md-mode--table-widgets)
       (should (equal (buffer-string) source)))))
 
+(ert-deftest md-mode-table-measurement-excludes-window-decoration ()
+  (with-temp-buffer
+    (insert "Existing text\n")
+    (let ((original (buffer-string))
+          (position (point)))
+      (cl-letf (((symbol-function 'window-buffer)
+                 (lambda (_) (current-buffer)))
+                ((symbol-function 'window-text-pixel-size)
+                 (lambda (_window from to &rest _args)
+                   (cons (+ (if display-line-numbers 28 0)
+                            (* 7 (- to from)))
+                         14))))
+        (dolist (numbers '(nil t relative visual))
+          (setq-local display-line-numbers numbers)
+          (should (= (md-render--table-measure-string
+                      " " (selected-window)) 7))
+          (should (= (md-render--table-measure-string
+                      "MMMM" (selected-window)) 28))
+          (should (eq display-line-numbers numbers))))
+      (should (equal (buffer-string) original))
+      (should (= (point) position)))))
+
+(ert-deftest md-mode-table-measurement-preserves-tab-stops ()
+  (with-temp-buffer
+    (let ((tab-width 8))
+      (cl-letf (((symbol-function 'window-buffer)
+                 (lambda (_) (current-buffer)))
+                ((symbol-function 'window-text-pixel-size)
+                 (lambda (_window from to &rest _args)
+                   (cl-loop with columns = 0
+                            for char across
+                            (buffer-substring-no-properties from to)
+                            do (setq columns
+                                     (+ columns
+                                        (if (eq char ?\t)
+                                            (- tab-width (% columns tab-width))
+                                          1)))
+                            finally return
+                            (cons (+ (if display-line-numbers 28 0)
+                                     (* 7 columns))
+                                  14)))))
+        (dolist (numbers '(nil t relative visual))
+          (setq-local display-line-numbers numbers)
+          (should (= (md-render--table-measure-string
+                      "a\tb" (selected-window)) 63))
+          (should (= (md-render--table-measure-string
+                      "\t" (selected-window)) 56))
+          (should (eq display-line-numbers numbers)))))))
+
+(ert-deftest md-mode-table-measurement-restores-state-on-error ()
+  (with-temp-buffer
+    (insert "Existing text\n")
+    (setq-local display-line-numbers 'relative)
+    (set-buffer-modified-p nil)
+    (let ((original (buffer-string))
+          (position (point))
+          (undo buffer-undo-list))
+      (cl-letf (((symbol-function 'window-buffer)
+                 (lambda (_) (current-buffer)))
+                ((symbol-function 'window-text-pixel-size)
+                 (lambda (&rest _) (error "Measurement failed"))))
+        (should-error (md-render--table-measure-string
+                       "a\tb" (selected-window))))
+      (should (eq display-line-numbers 'relative))
+      (should (equal (buffer-string) original))
+      (should (= (point) position))
+      (should-not (buffer-modified-p))
+      (should (eq buffer-undo-list undo)))))
+
 (ert-deftest md-mode-table-widget-aligns-mixed-font-borders-in-pixels ()
   (with-temp-buffer
     (let* ((source (concat "| Module | Target | State |\n"
