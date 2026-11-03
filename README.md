@@ -272,7 +272,7 @@ Rendered images and tables:
 
 | Option | Default | Purpose |
 |--------|---------|---------|
-| `md-render-image-max-width` | `0.4` | Limit inline images by a window-width ratio or pixel count |
+| `md-render-image-max-width` | `0.4` | Limit inline images and diagram previews by a window-width ratio or pixel count |
 | `md-render-prettify-tables` | `t` | Render tables with aligned columns |
 | `md-render-table-use-unicode-borders` | `t` | Use Unicode rather than ASCII table borders |
 | `md-render-table-wrap-columns` | `t` | Wrap table cells to fit the window; `nil` renders wide tables at natural width (scrollable) |

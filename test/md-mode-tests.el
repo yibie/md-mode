@@ -2275,6 +2275,26 @@ always overstates the usable width."
         (md-mode-show-source)
         (should (equal (buffer-string) source))))))
 
+(ert-deftest md-mode-diagram-respects-image-max-width ()
+  "Diagram previews are limited by `md-render-image-max-width'."
+  (save-window-excursion
+    (with-temp-buffer
+      (set-window-buffer (selected-window) (current-buffer))
+      (insert (propertize "x" 'md-render-media-file "/fake/graph.svg"))
+      (let ((md-render-image-max-width 0.4)
+            (marker (copy-marker (point-min)))
+            max-width)
+        (cl-letf (((symbol-function 'window-body-width)
+                   (lambda (&rest _) 1000))
+                  ((symbol-function 'create-image)
+                   (lambda (_file _type _data &rest properties)
+                     (setq max-width (plist-get properties :max-width))
+                     '(image :type svg :fake t))))
+          (md-render--media-apply
+           (list (current-buffer) marker "Graphviz" 'graphviz)
+           "/fake/graph.svg" nil)
+          (should (equal max-width 400)))))))
+
 (ert-deftest md-mode-first-render-applies-async-media-callback ()
   (let ((cache-directory (make-temp-file "md-mode-media-" t))
         sentinel)

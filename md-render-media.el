@@ -115,7 +115,7 @@ position that streaming renders must not advance past."
   "Return the maximum image width in pixels."
   (if (floatp md-render-image-max-width)
       (round (* md-render-image-max-width
-                (window-body-width (or (get-buffer-window (current-buffer))
+                (window-body-width (or (get-buffer-window (current-buffer) t)
                                        (frame-first-window))
                                    t)))
     md-render-image-max-width))
@@ -502,13 +502,6 @@ a single process."
         (unless waiting
           (md-render--start-media-process backend source file))))))
 
-(defun md-render--media-max-width (backend buffer)
-  "Return the maximum pixel width of a BACKEND preview in BUFFER."
-  (let ((window (get-buffer-window buffer t)))
-    (if (and window (not (eq backend 'math)))
-        (floor (* 0.9 (window-body-width window t)))
-      (md-render--image-max-width))))
-
 (defun md-render--media-apply (watcher file error-message)
   "Show FILE, or ERROR-MESSAGE, at the placeholder of WATCHER.
 Placeholders that no longer expect FILE are left alone."
@@ -533,8 +526,7 @@ Placeholders that no longer expect FILE are left alone."
                       (let ((image (create-image
                                     file nil nil
                                     :ascent 'center
-                                    :max-width (md-render--media-max-width
-                                                backend buffer))))
+                                    :max-width (md-render--image-max-width))))
                         (put-text-property pos (1+ pos) 'display image)
                         (when align
                           (put-text-property
